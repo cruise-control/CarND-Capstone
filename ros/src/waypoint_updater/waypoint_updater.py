@@ -176,7 +176,7 @@ class WaypointUpdater(object):
         self.minIdx = newIdx % len(self.waypoints)
 
         # Add N future waypoints to the match list
-        for i in range(40):
+        for i in range(20):
             idx = newIdx + 15 + i * 5
             idx %= len(self.map_x)
             px.append(self.map_x[idx])
@@ -188,7 +188,7 @@ class WaypointUpdater(object):
 
         pts = []
 
-        s = np.arange(0, tkc.s[-1], 0.5)
+        s = np.arange(0, tkc.s[-1], 1)
         index = 0
         for i in s:
             ix, iy = Utility.fitX(i, tkc)
