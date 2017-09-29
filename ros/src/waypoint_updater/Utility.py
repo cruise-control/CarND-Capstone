@@ -49,24 +49,49 @@ def generateMapS(map_x,map_y):
 def distance(x1,y1,x2,y2):
     return math.sqrt((x2-x1)**2 + (y2-y1)**2)
 
-def closestWaypoint(x, y, map_x, map_y, last_idx=None):
+def closestWaypoint(x, y, map_x, map_y, last_idx=-1):
     '''
-    Get the closes waypoint to the vehicle
+    Get the closes waypoint to the vehicle.
+    If there is a previous waypoint, search between 400 
+    map entries either side of it. This will greatly reduce
+    the search time (~11000 searches reduced to 800)
     '''
+    
+    DEBUG = False
     index = 0
-    minD = 100000
-    count = 0
-    idx = 0
+    minD = 10000000
+    dist = 400
+    waypointRange = dist*2
+    map_size = len(map_x)
+    
+    if (last_idx - dist) > 0 :
+        start_idx = (last_idx - dist) 
+    else:
+        start_idx = map_size + (last_idx - dist)
 
-    for mx, my in zip(map_x, map_y):
-        d = distance(x,y,mx,my)
+    end_idx = (last_idx + dist) % map_size if last_idx > 0 else map_size
+
+    # If there is no last index, override and search the entire map
+    if last_idx == -1:
+        last_idx = 0
+        waypointRange = map_size
+
+    for i in range(waypointRange):
+        idx = ( start_idx + i ) % map_size
+        d = distance( x, y, map_x[idx], map_y[idx] )
         if d < minD:
             minD = d
-            index = count
-        count += 1
+            index = idx
+        if DEBUG:
+            rospy.loginfo('@_3 i %s %s %s %s', i, d, minD, idx)
+    
+    if DEBUG:
+        rospy.loginfo('@_2 LastWaypoint %s StartIdx %s EndIdx %s ChosenIdx %s Actual %s CLosest %s',
+        lastWaypoint, start_idx, end_idx, index,  nextWaypoint(self.pose.position.x, self.pose.position.y, self.heading, self.map_x, self.map_y,last_idx=-1),
+        closestWaypoint(self.pose.position.x, self.pose.position.y, self.map_x, self.map_y) )
     return index
 
-def nextWaypoint(x, y, theta, map_x, map_y, last_idx=None):
+def nextWaypoint(x, y, theta, map_x, map_y, last_idx=-1):
     '''
     Get the next waypoint in front of the vehicle
     '''
