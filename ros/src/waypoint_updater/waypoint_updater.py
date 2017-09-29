@@ -72,7 +72,7 @@ class WaypointUpdater(object):
     map_y = None
     map_s = None
     generated_waypoints = []
-    minIdx = 0
+    minIdx = -1
     mutex = Lock()
     traffic_light_map = None
 
@@ -110,99 +110,41 @@ class WaypointUpdater(object):
     def ddDistance(self,x1,y1,x2,y2):
         return math.sqrt((x2-x1)**2 + (y2-y1)**2)
 
-    def findNextWaypoint(self):
-        '''
-        Get the closest waypoint to the vehicle
-        '''
-        index = 0
-        minD = 100000
-        count = 0
-        idx = 0
-        for wp in self.waypoints:
-            #d = self.ddDistance(self.pose.position.x,self.pose.position.y,wp.pose.pose.position.x,wp.pose.pose.position.y)
-            d = self.ddDistance(self.pose.position.x,0,wp.pose.pose.position.x,0)# Only do X distance
-            if d < minD:
-                minD = d
-                index = count
-            count += 1
-        return index
 
-
-    def methodA(self):
+    def getSimpleMapPath(self):
+        DEBUG = False
+        
         start = time.time()
-        self.s, self.d = Utility.convertToFrenet(self.pose.position.x, self.pose.position.y, self.heading, self.map_x, self.map_y)
-        pts = []
-        for i in range(LOOKAHEAD_WPS):
-            ns = self.s + 0.75* i
-            nd = self.d
-            x,y = Utility.convertFromFrenet(ns, nd, self.map_s, self.map_x, self.map_y)
-            wp = Waypoint()
-            wp.pose.pose.position.x = x
-            wp.pose.pose.position.y = y
-            wp.pose.header.seq = i
-            wp.pose.header.stamp = rospy.Time(0)
-            wp.pose.header.frame_id = '/world'
-            wp.twist.header.seq = i
-            wp.twist.header.stamp = rospy.Time(0)
-            wp.twist.header.frame_id = '/world'
-            minIdx = Utility.nextWaypoint(x, y,self.heading, self.map_x, self.map_y)
-            wp.pose.pose.orientation = self.waypoints[(minIdx)].pose.pose.orientation # Set the orientation to that of the nearest wp
-            #wp.twist.twist.linear.x = 15
-            pts.append(wp)
-            # Set the velocity of the newly loaded waypoint
-            self.set_waypoint_velocity(pts,i,5)
-            rospy.loginfo('@_2 waypoint_%s: (X,Y) (%s,%s) next idx %s heading %s s %s d %s', str(i), str(x), str(y), str(minIdx), self.heading, self.s, self.d)
-        self.generated_waypoints = pts
-
-    def methodB(self):
-        start = time.time()
-        newIdx = Utility.nextWaypoint(self.pose.position.x, self.pose.position.y, self.heading, self.map_x, self.map_y, last_idx=None)
-        #newIdx = self.findNextWaypoint()
+        
+        newIdx = Utility.nextWaypoint(self.pose.position.x, self.pose.position.y, self.heading, self.map_x, self.map_y, last_idx=self.minIdx)
         end = time.time()
-        newIdx += 2
+        
         newIdx %= len(self.map_x)
-        rospy.loginfo('@_2 C exeTime %s X,Y (%s,%s) MX,My (%s,%s) NextIDX %s LenWaypoints %s heading %s distance %s',
-        str(end - start),
-        str(self.pose.position.x),
-        str(self.pose.position.y),
-        str(self.waypoints[newIdx].pose.pose.position.x),
-        str(self.waypoints[newIdx].pose.pose.position.y),
-        str(self.minIdx),
-        str(len(self.waypoints)),
-        self.heading,
-        self.distance(self.waypoints,newIdx,self.minIdx) )
+        if DEBUG:
+            rospy.loginfo('@_2 C exeTime %s X,Y (%s,%s) MX,My (%s,%s) NextIDX %s LenWaypoints %s heading %s',
+            str(end - start),
+            str(self.pose.position.x),
+            str(self.pose.position.y),
+            str(self.waypoints[newIdx].pose.pose.position.x),
+            str(self.waypoints[newIdx].pose.pose.position.y),
+            str(self.minIdx),
+            str(len(self.waypoints)),
+            self.heading )
 
         self.minIdx = newIdx
 
-        if True:
-            self.generated_waypoints = []
-            for wp in range(LOOKAHEAD_WPS):
-                self.generated_waypoints.append(self.waypoints[(self.minIdx+wp)%len(self.waypoints)])
-                # Cross track error causes the target velocity to decrease (does not recover)
-                if self.minIdx > 6000 and self.minIdx < 7000:
-                    self.set_waypoint_velocity(self.generated_waypoints,wp,10)
-                else:
-                    self.set_waypoint_velocity(self.generated_waypoints,wp,20)
-        else:
-            # Fill in the data first time around
-            if len(self.generated_waypoints) < 1:
-                for wp in range(LOOKAHEAD_WPS):
-                    self.generated_waypoints.append(self.waypoints[self.minIdx+wp%len(self.waypoints)])
+        self.generated_waypoints = []
+        for wp in range(LOOKAHEAD_WPS):
+            idx = (self.minIdx+wp)%len(self.waypoints)
+            self.generated_waypoints.append(self.waypoints[idx])
+            # Cross track error causes the target velocity to decrease (does not recover)
+            if self.minIdx > 6000 and self.minIdx < 7000:
+                self.set_waypoint_velocity(self.generated_waypoints,wp,10)
             else:
-                process = True
-                while process:
-                    # This means that the real next waypoint is not the one we are publishing
-                    if len(self.generated_waypoints) == 0:
-                        break
-                    if self.waypoints[self.minIdx].pose.pose.position.x != self.generated_waypoints[0].pose.pose.position.x:
-                        self.generated_waypoints.pop(0)
-                    else:
-                        process = False
+                self.set_waypoint_velocity(self.generated_waypoints,wp,20)
+    
 
-                for wp in range(len(self.generated_waypoints),LOOKAHEAD_WPS):
-                    self.generated_waypoints.append(self.waypoints[(self.minIdx+wp)%len(self.waypoints)])
-
-    def methodC(self):
+    def getSplinePath(self):
         start = time.time()
 
         self.s, self.d = Utility.convertToFrenet(
@@ -229,10 +171,12 @@ class WaypointUpdater(object):
         self.heading,
         self.map_x,
         self.map_y,
-        last_idx=None)
+        last_idx=self.minIdx)
+        
+        self.minIdx = newIdx % len(self.waypoints)
 
         # Add N future waypoints to the match list
-        for i in range(80):
+        for i in range(40):
             idx = newIdx + 15 + i * 5
             idx %= len(self.map_x)
             px.append(self.map_x[idx])
@@ -272,10 +216,10 @@ class WaypointUpdater(object):
         rate = rospy.Rate(1) # N Hz
         while not rospy.is_shutdown():
             if self.waypoints and self.pose and self.prev_pose:
-                if False:
-                    self.methodC()
+                if True:
+                    self.getSplinePath()
                 else:
-                    self.methodB()
+                    self.getSimpleMapPath()
                 # Create a new lane message type
                 l = Lane()
                 l.header.frame_id = '/world'
