@@ -182,7 +182,11 @@ class WaypointUpdater(object):
             px.append(self.map_x[idx])
             py.append(self.map_y[idx])
 
-        rospy.loginfo( '@_2 nextIdx %s heading %s X %s Y %s %s %s', newIdx, self.heading, self.pose.position.x, self.pose.position.y, px, py )
+        #rospy.loginfo( '@_2 nextIdx %s heading %s X %s Y %s %s %s', newIdx, self.heading, self.pose.position.x, self.pose.position.y, px, py )
+
+        waypoint_str = "\n".join([repr(z) for z in zip(range(len(px)), px, py)])
+        rospy.loginfo( '\n@_2 nextIdx %s heading %s X %s Y %s\n===\n%s\n===\n', newIdx, self.heading, self.pose.position.x, self.pose.position.y, waypoint_str )
+
         # Fit the spline
         tkc = Utility.getSplineCoeffs(px, py)
 

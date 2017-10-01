@@ -86,7 +86,7 @@ class DBWNode(object):
         
         self.current_velocity = cv.twist
         #self.current_velocity.linear.x *= 0.44704 # convert to m/s from mph
-        rospy.loginfo('@_1 Curr x %s y %s', str(self.current_velocity.linear.x), str(self.current_velocity.linear.y))
+        rospy.loginfo('@_1 Curr velx %s yawdot %s', str(self.current_velocity.linear.x), str(self.current_velocity.angular.z))
 
     
     def dbw_enabled_cb(self, dbw):
@@ -97,7 +97,7 @@ class DBWNode(object):
         Pull in the TwistCommand
         '''
         self.target_twist = twistCommand.twist
-        rospy.loginfo('@_1 Target x %s z %s', str(twistCommand.twist.linear.x), str(twistCommand.twist.angular.z))
+        rospy.loginfo('@_1 Target velx %s yawdot %s', str(twistCommand.twist.linear.x), str(twistCommand.twist.angular.z))
 
         pass
 
@@ -129,7 +129,7 @@ class DBWNode(object):
                                     angular_velocity=self.target_twist.angular.z, 
                                     current_velocity=self.current_velocity.linear.x)
             
-                rospy.loginfo('@_1 Computing PID %s brake %s YAW %s',str(t), str(b), str(s))
+                rospy.loginfo('@_1 PID OUT: THR %s BRK %s YAW %s', str(t), str(b), str(s))
                 # TODO: Get predicted throttle, brake, and steering using `twist_controller`
                 # You should only publish the control commands if dbw is enabled
                 # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
@@ -139,20 +139,23 @@ class DBWNode(object):
                 #                                                     <any other argument you need>)
                 #if  self.dbw_enabled:
                 self.publish(t,b,s)
+
             rate.sleep()
 
     def publish(self, throttle, brake, steer):
         # Only publish with updated values. This is to
         # fix the lag issue
-        if brake > 0:
-            if brake != self.prev_brake:
-                self.prev_brake = brake
-                bcmd = BrakeCmd()
-                bcmd.enable = True
-                bcmd.pedal_cmd_type = BrakeCmd.CMD_TORQUE
-                bcmd.pedal_cmd = brake
-                self.brake_pub.publish(bcmd)
-        else:
+        if brake != self.prev_brake:
+            self.prev_brake = brake
+            bcmd = BrakeCmd()
+            bcmd.enable = True
+            bcmd.pedal_cmd_type = BrakeCmd.CMD_TORQUE
+            bcmd.pedal_cmd = brake
+            self.brake_pub.publish(bcmd)
+
+        # The simulator latches the commands, so we always need to check 
+        # whether or not to apply throttle
+        if brake <= 0:
             #if throttle != self.prev_throttle:
             self.prev_throttle = throttle
             tcmd = ThrottleCmd()
