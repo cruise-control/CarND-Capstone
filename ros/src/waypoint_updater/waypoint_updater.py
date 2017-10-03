@@ -231,9 +231,40 @@ class WaypointUpdater(object):
                 l.header.stamp = rospy.Time(0)
                 l.waypoints = self.generated_waypoints
 
+                if(self.decel_flag):
+                    self.decelerate()
+
                 # Publish the generated message
                 self.final_waypoints_pub.publish(l)
             rate.sleep()
+
+
+    def decelerate(self):
+        # Decelerate the generated_waypoints like waypoint_loader/decelerate()
+        # first, find the generated_waypoint closest to the stop line
+        closest_wp = -1
+        closest_dist = float('inf')
+        stop = self.waypoints[self.red_light]
+        rospy.loginfo('Decel to stop: %s', self.red_light)
+        for i in range(len(self.generated_waypoints)):
+            dist = self.euclid_distance(self.generated_waypoints[i].pose.pose.position, \
+                                                               stop.pose.pose.position)
+            if(dist<closest_dist):
+                closest_wp = i
+                closest_dist = dist
+
+        # then, come to a stop at the end waypoint/stop line
+        self.set_waypoint_velocity(self.generated_waypoints, closest_wp, 0)
+        for i in range(closest_wp):  # since the first waypoint is where we are now
+            dist = self.euclid_distance(self.generated_waypoints[i].pose.pose.position, \
+                                        self.generated_waypoints[closest_wp].pose.pose.position)
+            vel = math.sqrt(2 * MAX_DECEL * dist) * 3.6
+            if vel < 1.:
+                vel = 0.
+            rospy.loginfo('Deceleration Velocity: %s', vel)
+            self.set_waypoint_velocity(self.generated_waypoints, i, min(vel, self.get_waypoint_velocity(self.generated_waypoints[i])))
+        return
+
 
     def waypoints_cb(self, waypoints):
         # Update / set the current waypoints
@@ -258,9 +289,17 @@ class WaypointUpdater(object):
 
 
     def traffic_cb(self, msg):
-        # TODO: Callback for /traffic_waypoint message. Implement
-        #self.lights = msg.lights
-        pass
+        # Callback for /traffic_waypoint message
+        #   contains (Int32) stop line waypoint of upcoming *red* light
+        self.red_light = int(msg.data)
+
+        rospy.loginfo('Red light coming: %s', self.red_light)
+
+        # Decelerate the final_waypoints
+        if(self.red_light>-1):
+            self.decel_flag = True
+
+
 
     def obstacle_cb(self, msg):
         # TODO: Callback for /obstacle_waypoint message. We will implement it later
