@@ -102,7 +102,7 @@ class DBWNode(object):
         pass
 
     def loop(self):
-        rate = rospy.Rate(60) # NHz
+        rate = rospy.Rate(10) # NHz
         while not rospy.is_shutdown():
             # Return if there is no target velocity to meet
             if self.target_twist and self.current_velocity:
