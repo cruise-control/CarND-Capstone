@@ -40,6 +40,7 @@ Steps:
 '''
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
+TARGET_VELOCITY = 15;
 
 #class Vehicle(object):
 #    pose
@@ -141,7 +142,7 @@ class WaypointUpdater(object):
             if self.minIdx > 6000 and self.minIdx < 7000:
                 self.set_waypoint_velocity(self.generated_waypoints,wp,10)
             else:
-                self.set_waypoint_velocity(self.generated_waypoints,wp,20)
+                self.set_waypoint_velocity(self.generated_waypoints,wp,TARGET_VELOCITY)
     
 
     def getSplinePath(self):
@@ -182,7 +183,11 @@ class WaypointUpdater(object):
             px.append(self.map_x[idx])
             py.append(self.map_y[idx])
 
-        rospy.loginfo( '@_2 nextIdx %s heading %s X %s Y %s %s %s', newIdx, self.heading, self.pose.position.x, self.pose.position.y, px, py )
+        #rospy.loginfo( '@_2 nextIdx %s heading %s X %s Y %s %s %s', newIdx, self.heading, self.pose.position.x, self.pose.position.y, px, py )
+
+        waypoint_str = "\n".join([repr(z) for z in zip(range(len(px)), px, py)])
+        rospy.loginfo( '\n@_2 nextIdx %s heading %s X %s Y %s\n===\n%s\n===\n', newIdx, self.heading, self.pose.position.x, self.pose.position.y, waypoint_str )
+
         # Fit the spline
         tkc = Utility.getSplineCoeffs(px, py)
 
@@ -205,7 +210,7 @@ class WaypointUpdater(object):
             wp.twist.header.stamp = rospy.Time(0)
             wp.twist.header.frame_id = '/world'
             pts.append(wp)
-            self.set_waypoint_velocity(pts,index,20)
+            self.set_waypoint_velocity(pts,index,TARGET_VELOCITY)
             index += 1
             if index > range(LOOKAHEAD_WPS):
                 break
