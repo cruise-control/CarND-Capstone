@@ -10,6 +10,7 @@ from light_classification.tl_classifier import TLClassifier
 import tf
 import cv2
 import yaml
+import numpy as np
 
 STATE_COUNT_THRESHOLD = 3
 
@@ -101,7 +102,18 @@ class TLDetector(object):
 
         """
         #TODO implement
-        return 0
+        p = (pose.position.x, pose.position.y, pose.position.z)
+        min_dist = 100000
+        closest_wpnt = -1
+
+        for i in range(len(self.waypoints.waypoints)):
+            w = self.waypoints.waypoints[i].pose.pose.position
+            q = (w.x, w.y, w.z)
+            ifnp.sqrt((p[0]-q[0])**2+(p[1]-q[1])**2+(p[2]-q[2])**2) <min_dist:
+                min_dist = np.sqrt((p[0]-q[0])**2+(p[1]-q[1])**2+(p[2]-q[2])**2)
+                closest_wpnt = 1
+        
+        return min_dist
 
 
     def project_to_image_plane(self, point_in_world):
