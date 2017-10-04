@@ -147,8 +147,22 @@ class TLDetector(object):
 
         #TODO Use tranform and rotation to calculate 2D position of light in image
 
-        x = 0
-        y = 0
+        #define world x and world y
+        wx = point_in_world.position.x
+        wy = point_in_world.position.y
+        wz = point_in_world.position.z
+
+        rpy = tf.transformations.euler_from_quaternion(rot)
+        yaw = rpy[2]
+
+        point_in_camera = (wx * math.cos(yaw) - wy * math.sin(yaw),
+                           wx * math.sin(yaw) + wy * math.cos(yaw),
+                           wz)
+
+        point_to_cam = [sum(x) for x in zip(point_to_cam, trans)]
+
+        x = -fx * point_to_cam[1]/point_to_cam[0] + image_width / 2
+        y = -fy * point_to_cam[2]/point_to_cam[0] + image_height / 2
 
         return (x, y)
 
