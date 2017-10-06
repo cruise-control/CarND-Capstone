@@ -41,6 +41,7 @@ Steps:
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
 TARGET_VELOCITY = 15;
+MAX_DECEL = 1.0
 
 #class Vehicle(object):
 #    pose
@@ -94,6 +95,10 @@ class WaypointUpdater(object):
         self.seq = 0
 
         # TODO: Add other member variables you need below
+        self.red_light = -1  # std_msg/Int32 index to upcoming *red* light, used in traffic_cb
+        # If final_waypoints should contain a deceleration to an upcoming red light
+        #self.decel_flag = False
+        self.decel_flag = True  # debugging
 
         #rospy.spin()
         self.loop()
@@ -114,12 +119,12 @@ class WaypointUpdater(object):
 
     def getSimpleMapPath(self):
         DEBUG = False
-        
+
         start = time.time()
-        
+
         newIdx = Utility.nextWaypoint(self.pose.position.x, self.pose.position.y, self.heading, self.map_x, self.map_y, last_idx=self.minIdx)
         end = time.time()
-        
+
         newIdx %= len(self.map_x)
         if DEBUG:
             rospy.loginfo('@_2 C exeTime %s X,Y (%s,%s) MX,My (%s,%s) NextIDX %s LenWaypoints %s heading %s',
@@ -143,7 +148,7 @@ class WaypointUpdater(object):
                 self.set_waypoint_velocity(self.generated_waypoints,wp,10)
             else:
                 self.set_waypoint_velocity(self.generated_waypoints,wp,TARGET_VELOCITY)
-    
+
 
     def getSplinePath(self):
         start = time.time()
@@ -173,7 +178,7 @@ class WaypointUpdater(object):
         self.map_x,
         self.map_y,
         last_idx=self.minIdx)
-        
+
         self.minIdx = newIdx % len(self.waypoints)
 
         # Add N future waypoints to the match list
@@ -244,25 +249,25 @@ class WaypointUpdater(object):
         # first, find the generated_waypoint closest to the stop line
         closest_wp = -1
         closest_dist = float('inf')
-        stop = self.waypoints[self.red_light]
+        stop_point = self.waypoints[self.red_light]
         rospy.loginfo('Decel to stop: %s', self.red_light)
         for i in range(len(self.generated_waypoints)):
             dist = self.euclid_distance(self.generated_waypoints[i].pose.pose.position, \
-                                                               stop.pose.pose.position)
+                                                         stop_point.pose.pose.position)
             if(dist<closest_dist):
                 closest_wp = i
                 closest_dist = dist
 
         # then, come to a stop at the end waypoint/stop line
-        self.set_waypoint_velocity(self.generated_waypoints, closest_wp, 0)
-        for i in range(closest_wp):  # since the first waypoint is where we are now
+        for i in range(0, closest_wp):  # since the first waypoint is where we are now
             dist = self.euclid_distance(self.generated_waypoints[i].pose.pose.position, \
                                         self.generated_waypoints[closest_wp].pose.pose.position)
-            vel = math.sqrt(2 * MAX_DECEL * dist) * 3.6
+            vel = math.sqrt(2*MAX_DECEL * dist)
             if vel < 1.:
                 vel = 0.
             rospy.loginfo('Deceleration Velocity: %s', vel)
             self.set_waypoint_velocity(self.generated_waypoints, i, min(vel, self.get_waypoint_velocity(self.generated_waypoints[i])))
+        self.set_waypoint_velocity(self.generated_waypoints, i, 0)
         return
 
 
@@ -326,6 +331,31 @@ class WaypointUpdater(object):
             dist += dl(waypoints[wp1].pose.pose.position, waypoints[i].pose.pose.position)
             wp1 = i
         return dist
+
+
+# from Lesson 5: Trajectory Exercise 2
+def JMT(start, end, T):
+    """
+    Calculates Jerk Minimizing Trajectory for start, end and T.
+    """
+    a_0, a_1, a_2 = start[0], start[1], start[2] / 2.0
+    c_0 = a_0 + a_1 * T + a_2 * T**2
+    c_1 = a_1 + 2* a_2 * T
+    c_2 = 2 * a_2
+
+    A = np.array([
+            [  T**3,   T**4,    T**5],
+            [3*T**2, 4*T**3,  5*T**4],
+            [6*T,   12*T**2, 20*T**3],
+        ])
+    B = np.array([
+            end[0] - c_0,
+            end[1] - c_1,
+            end[2] - c_2
+        ])
+    a_3_4_5 = np.linalg.solve(A,B)
+    alphas = np.concatenate([np.array([a_0, a_1, a_2]), a_3_4_5])
+    return alphas
 
 
 if __name__ == '__main__':
