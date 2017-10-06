@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 import rospy
+import tf
 
 from geometry_msgs.msg import PoseStamped, Point
-
+from styx_msgs.msg import Lane, Waypoint
 from visualization_msgs.msg import Marker
 
 # See following tutorial for reference
@@ -13,55 +14,108 @@ class Visualization(object):
     def __init__(self):
         rospy.init_node('visualization')
         #rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
-        #rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
+        rospy.Subscriber('/final_waypoints', Lane, self.waypoints_cb)
 
-        self.visulization_pub = rospy.Publisher('/pose_vis2', Marker, queue_size=1)
-
-        
-        while not rospy.is_shutdown():
-            self.pose_cb()
-            print self.visulization_pub.get_num_connections()
-
+        self.visualization_pub = rospy.Publisher('/pose_vis2', Marker, queue_size=1)
+        self.transform = tf.TransformListener()
+        #while not rospy.is_shutdown():
+        #    self.pose_cb()
+            #print self.visualization_pub.get_num_connections()
+        #self.counter = 0
         rospy.spin()
 
-    def pose_cb(self):
-        marker = Marker()
-        marker.header.frame_id = "/world"
-        marker.header.stamp = rospy.Time.now()
-        marker.id = 0
-        marker.type = marker.CUBE
-        marker.scale.x = 5
-        marker.scale.y = 5
-        marker.scale.z = 5
-        marker.ns = "car"
 
-        marker.action = marker.ADD
-        marker.pose.orientation.x = 0
-        marker.pose.orientation.y = 0
-        marker.pose.orientation.z = 0
-        marker.pose.orientation.w = 1.0
-        marker.pose.position.x = 1.
-        marker.pose.position.y = 1.
-        marker.pose.position.z = 0.
+    def waypoints_cb(self, msg):
+        if self.visualization_pub.get_num_connections() > 0:
+            
+            # Marker is a visualization msg for rviz
+            marker = Marker()
+            
+            # Base link refers to vehicle coordinate system
+            marker.header.frame_id = '/world'
+            marker.header.stamp = rospy.Time.now()
+            marker.id = 0
+            marker.type = marker.SPHERE_LIST
+            marker.scale.x = 0.5
+            marker.scale.y = 0.5
+            marker.scale.z = 0.5
+            marker.ns = "car"
 
-        marker.color.r = 0.0
-        marker.color.g = 1.0
-        marker.color.b = 0.0
-        marker.color.b = 1.0
-        marker.lifetime = rospy.Duration(0)
+            marker.action = marker.ADD
+            marker.pose.orientation.x = 0.
+            marker.pose.orientation.y = 0.
+            marker.pose.orientation.z = 0.
+            marker.pose.orientation.w = 1.0
+            marker.pose.position.x = 0. #msg.pose.position.x
+            marker.pose.position.y = 0. #msg.pose.position.y
+            marker.pose.position.z = 0.
+            
+            # Set RGB-A channels
+            marker.color.r = 0.0
+            marker.color.g = 1.0
+            marker.color.b = 0.0
+            marker.color.a = 1.0
 
-        #for i in range(10):
-        #    p = Point()
-        #    p.x = i
-        #    p.y = 0.5
-        #    p.z = 0.5
-        #    marker.points.append(p)
-        #marker.pose = msg.pose
-        self.visulization_pub.publish(marker)
-        #x = msg.pose.position.x
-        #y = msg.pose.position.y
-        #z = msg.pose.position.z
-        rospy.sleep(1)
+            # Zero lifetime means it won't be deleted
+            marker.lifetime = rospy.Duration(0)
+
+            print 'msg type:', type(msg.waypoints)
+            print 'msg size:', len(msg.waypoints)
+            
+            #print 'msg frame_id', msg.waypoints[0].pose.header.frame_id
+            for waypoint in msg.waypoints:
+            #    waypoint.pose.header.frame_id = '/base_link'
+            #    #try:
+            #     = self.transform.transformPose('/world', waypoint.pose)
+            #    #except tf.LookupException: 
+                #    print 'WTF'
+                p = Point()
+                p = waypoint.pose.pose.position
+                marker.points.append(p)
+            self.visualization_pub.publish(marker)
+            rospy.sleep(2)
+
+
+
+    def pose_cb(self, msg):
+        if self.visualization_pub.get_num_connections() > 0:
+            marker = Marker()
+            marker.header.frame_id = "/base_link" 
+            marker.header.stamp = rospy.Time.now()
+            marker.id = 0
+            marker.type = marker.SPHERE_LIST
+            marker.scale.x = 0.5
+            marker.scale.y = 0.5
+            marker.scale.z = 0.5
+            marker.ns = "car"
+
+            marker.action = marker.ADD
+            marker.pose.orientation.x = 0.
+            marker.pose.orientation.y = 0.
+            marker.pose.orientation.z = 0.
+            marker.pose.orientation.w = 1.0
+            marker.pose.position.x = 0. #msg.pose.position.x
+            marker.pose.position.y = 0. #msg.pose.position.y
+            marker.pose.position.z = 0.
+
+            marker.color.r = 0.0
+            marker.color.g = 1.0
+            marker.color.b = 0.0
+            marker.color.a = 1.0
+            marker.lifetime = rospy.Duration(0) # zero means that it won't be deleted
+
+            for i in range(10):
+                p = Point()
+                p.x = i
+                p.y = 0.5
+                p.z = 0.5
+                marker.points.append(p)
+            #marker.pose = msg.pose
+            self.visualization_pub.publish(marker)
+            #x = msg.pose.position.x
+            #y = msg.pose.position.y
+            #z = msg.pose.position.z
+        rospy.sleep(2)
 
 
 
