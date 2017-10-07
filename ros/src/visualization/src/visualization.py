@@ -17,13 +17,7 @@ class Visualization(object):
         rospy.Subscriber('/final_waypoints', Lane, self.waypoints_cb)
 
         self.visualization_pub = rospy.Publisher('/pose_vis2', Marker, queue_size=1)
-        #self.transform = tf.TransformListener()
 
-        #self.pose = PoseStamped()
-        #while not rospy.is_shutdown():
-        #    self.pose_cb()
-            #print self.visualization_pub.get_num_connections()
-        #self.counter = 0
         rospy.spin()
 
 
@@ -48,8 +42,8 @@ class Visualization(object):
             #marker.pose.orientation.y = 0.
             #marker.pose.orientation.z = 0.
             #marker.pose.orientation.w = 1.0
-            #marker.pose.position.x = 0. #msg.pose.position.x
-            #marker.pose.position.y = 0. #msg.pose.position.y
+            #marker.pose.position.x = 0. 
+            #marker.pose.position.y = 0.
             #marker.pose.position.z = 0.
             
             # Set RGB-A channels
@@ -61,24 +55,12 @@ class Visualization(object):
             # Zero lifetime means it won't be deleted
             marker.lifetime = rospy.Duration(1)
             
-            #print 'msg frame_id', msg.waypoints[0].pose.header.frame_id
+            # Read out waypoint positions from lane and publish for rviz
             for waypoint in msg.waypoints:
-            #    waypoint.pose.header.frame_id = '/base_link'
-            #    #try:
-            #     = self.transform.transformPose('/world', waypoint.pose)
-            #    #except tf.LookupException: 
-                #    print 'WTF'
                 p = Point()
                 p = waypoint.pose.pose.position
                 marker.points.append(p)
             self.visualization_pub.publish(marker)
-            rospy.sleep(2)
-
-
-
-    def pose_cb(self, msg):
-        self.pose = msg.pose
-        rospy.sleep(2)
 
 
 
