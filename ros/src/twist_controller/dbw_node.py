@@ -62,6 +62,10 @@ class DBWNode(object):
                                          BrakeCmd, queue_size=1)
 
         # TODO: Create `TwistController` object
+        self.controller = Controller(
+            wheel_base, steer_ratio, max_lat_accel,
+            accel_limit, max_steer_angle, decel_limit,
+            vehicle_mass, wheel_radius, brake_deadband,)
         # self.controller = TwistController(<Arguments you wish to provide>)
         self.yaw_controller = YawController(wheel_base,steer_ratio,0.0,max_lat_accel,max_steer_angle)
         # TODO Pass in proper initialization values to the controller
@@ -120,7 +124,7 @@ class DBWNode(object):
                 t, b, s = self.controller.control(error_velocity = (self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704, error_brake = brake_error)
             
                 if not self.dbw_enabled:
-                    self.controller.reset()
+                    self.controller.reset() 
             
                 if brake_error == 0:
                     b = 0
@@ -132,11 +136,10 @@ class DBWNode(object):
                 rospy.loginfo('@_1 Computing PID %s brake %s YAW %s',str(t), str(b), str(s))
                 # TODO: Get predicted throttle, brake, and steering using `twist_controller`
                 # You should only publish the control commands if dbw is enabled
-                # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
-                #                                                     <proposed angular velocity>,
-                #                                                     <current linear velocity>,
-                #                                                     <dbw status>,
-                #                                                     <any other argument you need>)
+                t,b,s = self.controller.control(linear_velocity=self.target_twist.linear.x,
+                                                                angular_velocity=self.target_twist.angular.z,
+                                                                current_linear_velocity=self.current_velocity.linear.x,
+                                                                self.dbw_enabled = True)
                 #if  self.dbw_enabled:
                 self.publish(t,b,s)
             rate.sleep()
