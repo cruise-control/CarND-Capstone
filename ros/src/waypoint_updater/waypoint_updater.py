@@ -480,9 +480,8 @@ class WaypointUpdater(object):
                 rospy.loginfo('Deceleration Velocity: %s', vel)
                 self.set_waypoint_velocity(self.generated_waypoints, i, min(vel, self.get_waypoint_velocity(self.generated_waypoints[i])))
 
-            # Always set last generated waypoint to 0.0 velocity
-            last_gen_wp = len(self.generated_waypoints)-1
-            self.set_waypoint_velocity(self.generated_waypoints, last_gen_wp, 0)
+            # i is now closest waypoint, always set to 0.0 velocity
+            self.set_waypoint_velocity(self.generated_waypoints, i, 0)
 
 
     def get_waypoint_velocity(self, waypoint):
