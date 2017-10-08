@@ -111,6 +111,7 @@ class TLDetector(object):
                 self.lights_pos_y.append(ps.pose.position.y)
         """
         # constantly updating light colors - TODO: use until we get camera classifier working
+        self.states = []
         for l in self.lights:
             self.states.append(l.state)  # uint8 of RED(0), YELLOW(1), GREEN(2), UNKNOWN(4)
         #rospy.loginfo('@_3 traffic_cb %s %s', self.lights_pos_x, self.lights_pos_y)
