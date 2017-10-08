@@ -13,6 +13,8 @@ import yaml
 from copy import deepcopy  # for waypoints
 import math
 
+from scipy.spatial import KDTree
+
 #import sys
 #sys.path.insert(0, "../waypoint_updater")  # for Utility
 #import Utility
@@ -27,9 +29,28 @@ class TLDetector(object):
         self.waypoints = None
         self.camera_image = None
         self.lights = []
+        self._waypoint_tree = None
+
+        # Base waypoints should only be published once
+        # For now it's best to assume this because we don't take any special
+        # care to re-initialize properly if we were to get a different set
+        # This won't happen in the simulator, but who knows about the real
+        # world?
+        msg = rospy.wait_for_message('/base_waypoints', Lane)
+        self.waypoints = msg.waypoints
+        rospy.loginfo('%d Waypoints loaded in tl_detector', len(self.waypoints))
+
+        # A kd-tree will be about as fast as possible for nearest neighbor
+        # searches, or at a minimum, the fastest solution with least effort :)
+        self._map_x = []
+        self._map_y = []
+        for wp in self.waypoints:
+            self._map_x.append(wp.pose.pose.position.x)
+            self._map_y.append(wp.pose.pose.position.y)
+        self._waypoint_tree = KDTree(zip(self._map_x,self._map_y))
+
 
         sub1 = rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
-        sub2 = rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
 
         '''
         /vehicle/traffic_lights provides you with the location of the traffic light in 3D map space and
@@ -75,25 +96,6 @@ class TLDetector(object):
         self.pose = msg
 
 
-    def waypoints_cb(self, msg):
-        # msg is a Lane
-        #self.waypoints = deepcopy(msg.waypoints)  # otherwise just a reference
-        self.waypoints = msg.waypoints
-        rospy.loginfo('Waypoints loaded in tl_detector')
-        """
-        # Fill in the local map data
-        if self.map_x is None:
-            self.map_x = []
-            self.map_y = []
-            # Pull out the x and y waypoints
-            i=0
-            while(wp = self.waypoints[i]):
-                self.map_x.append(wp.pose.pose.position.x)
-                self.map_y.append(wp.pose.pose.position.y)
-                i+=1
-        """
-
-
     def traffic_cb(self, msg):
         """ a TrafficLightArray of TrafficLight messages
             see tl_detector/light_publisher for examples
@@ -125,11 +127,7 @@ class TLDetector(object):
         self.has_image = True
         self.camera_image = msg
 
-        if(self.waypoints != None):  # called before waypoints loaded
-            light_wp, state = self.process_traffic_lights()
-        else:
-            rospy.loginfo('self.waypoints not yet loaded.')
-            return
+        light_wp, state = self.process_traffic_lights()
 
         '''
         Publish upcoming red lights at camera frequency.
@@ -152,6 +150,7 @@ class TLDetector(object):
     def get_closest_waypoint(self, point):
         """Identifies the closest path waypoint to the given position
             https://en.wikipedia.org/wiki/Closest_pair_of_points_problem
+            .. or not :)
         Args:
             position (geometry_msgs/Point): position to match a waypoint to
 
@@ -159,19 +158,11 @@ class TLDetector(object):
             int: index of the closest waypoint in self.waypoints
 
         """
-        #TODO improve with bisected search like wikipedia
-        # started with Cosgrove's Utility, but now see distance() in waypoint_updater
-        closest_wp = -1
-        closest_dist = float('inf')
-        dl = lambda a, b: math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2  + (a.z-b.z)**2)
-        for i in range(len(self.waypoints)):
-            dist = dl(point, self.waypoints[i].pose.pose.position)
-            if(dist < closest_dist):
-                closest_wp = i
-                closest_dist = dist
 
+        # Udacity has led us astray!!! This isn't really a closes pair of points
+        # problem, just a plain old nearest neighbor
+        _, closest_wp = self._waypoint_tree.query((point.x, point.y))
         return closest_wp
-        #return Utility.closestWaypoint(pose.position.x, pose.position.y, self.map_x, self.map_y)
 
 
     def project_to_image_plane(self, point_in_world):
