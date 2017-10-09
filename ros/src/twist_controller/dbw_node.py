@@ -33,13 +33,7 @@ that we have created in the `__init__` function.
 '''
 
 class DBWNode(object):
-    
-    dbw_enabled = False
-    target_twist = None
-    current_velocity = None
-    prev_throttle = 0
-    prev_brake = 0
-    
+
     def __init__(self):
         rospy.init_node('dbw_node')
 
@@ -69,11 +63,17 @@ class DBWNode(object):
 
         # TODO: Subscribe to all the topics you need to
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cb)
-        
         rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_enabled_cb)
-        
         rospy.Subscriber('/current_velocity', TwistStamped, self.current_velocity_cb)
-        
+
+        # Instance variables
+        self.dbw_enabled = False
+        self.target_twist = None
+        self.current_velocity = None
+        self.prev_throttle = 0
+        self.prev_brake = 0
+
+        # Main function
         self.loop()
         
     def current_velocity_cb(self, cv):
