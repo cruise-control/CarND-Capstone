@@ -16,6 +16,7 @@ class Controller(object):
 
     def reset(self):
         self.pid_speed.reset()
+        self.pid_brake.reset()
 
     def control(self, *args, **kwargs):
         # TODO: Change the arg, kwarg list to suit your needs

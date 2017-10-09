@@ -4,6 +4,7 @@ import rospy
 from std_msgs.msg import Bool
 from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
 from geometry_msgs.msg import TwistStamped
+from std_msgs.msg import Int32
 import math
 
 from twist_controller import Controller
@@ -34,6 +35,11 @@ that we have created in the `__init__` function.
 
 class DBWNode(object):
 
+    # FIXME These are not configured specially, they are just hardcoded in two
+    #       places
+    CONTROL_GO = 0
+    CONTROL_STOP = 1
+
     def __init__(self):
         rospy.init_node('dbw_node')
 
@@ -55,18 +61,17 @@ class DBWNode(object):
         self.brake_pub = rospy.Publisher('/vehicle/brake_cmd',
                                          BrakeCmd, queue_size=1)
 
-        # TODO: Create `TwistController` object
-        # self.controller = TwistController(<Arguments you wish to provide>)
         self.yaw_controller = YawController(wheel_base,steer_ratio,0.0,max_lat_accel,max_steer_angle)
-        # TODO Pass in proper initialization values to the controller
         self.controller = Controller()
 
-        # TODO: Subscribe to all the topics you need to
+        # Subscribe to all topics
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cb)
         rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_enabled_cb)
         rospy.Subscriber('/current_velocity', TwistStamped, self.current_velocity_cb)
+        rospy.Subscriber('/control_mode', Int32, self.control_mode_cb)
 
         # Instance variables
+        self.mode = self.CONTROL_STOP
         self.dbw_enabled = False
         self.target_twist = None
         self.current_velocity = None
@@ -90,8 +95,9 @@ class DBWNode(object):
 
     
     def dbw_enabled_cb(self, dbw):
-        self.dbw_enabled = dbw
+        self.dbw_enabled = bool(dbw.data)
         
+
     def twist_cb(self, twistCommand):
         '''
         Pull in the TwistCommand
@@ -99,47 +105,70 @@ class DBWNode(object):
         self.target_twist = twistCommand.twist
         rospy.loginfo('@_1 Target velx %s yawdot %s', str(twistCommand.twist.linear.x), str(twistCommand.twist.angular.z))
 
-        pass
+
+    def control_mode_cb(self, msg):
+        # TODO -- Need a lock
+        self.mode = int(msg.data)
+
+
+    def mode_go(self):
+        '''Go control mode
+        Use a PID to control brake/throttle/steering
+        '''
+        # Return if there is no target velocity to meet
+        if self.target_twist and self.current_velocity:
+
+            brake_error = 0
+            
+            if(self.current_velocity.linear.x - self.target_twist.linear.x) > 2:
+                # Normalise the brake error as a fraction of (from ~25 mph)
+                # meaning that 25 mph overspeed is maximum we are aiming for
+                brake_error = (self.current_velocity.linear.x - self.target_twist.linear.x)/10;
+                
+            rospy.loginfo('@_1 Computing PID vel_err %s & brk_err %s',str((self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704), str(brake_error))
+            
+            # Pass in the normalized velocity error to the controller
+            t, b, s = self.controller.control(error_velocity = (self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704, error_brake = brake_error)
+        
+            if not self.dbw_enabled:
+                self.controller.reset()
+        
+            if brake_error == 0:
+                b = 0
+            b *= 10000
+            s = self.yaw_controller.get_steering(linear_velocity=self.target_twist.linear.x, 
+                                angular_velocity=self.target_twist.angular.z, 
+                                current_velocity=self.current_velocity.linear.x)
+        
+            rospy.loginfo('@_1 PID OUT: THR %s BRK %s YAW %s', str(t), str(b), str(s))
+            # TODO: Get predicted throttle, brake, and steering using `twist_controller`
+            # You should only publish the control commands if dbw is enabled
+            # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
+            #                                                     <proposed angular velocity>,
+            #                                                     <current linear velocity>,
+            #                                                     <dbw status>,
+            #                                                     <any other argument you need>)
+#            if self.dbw_enabled:
+            self.publish(t,b,s)
+#            else:
+#                self.controller.reset()
+
+
+    def mode_stop(self):
+        '''Stop control mode
+        Just hold the brake to the floor!
+        '''
+        self.publish(0, 100000, 0)
+        self.controller.reset()
+
 
     def loop(self):
         rate = rospy.Rate(10) # NHz
         while not rospy.is_shutdown():
-            # Return if there is no target velocity to meet
-            if self.target_twist and self.current_velocity:
-
-                brake_error = 0
-                
-                if(self.current_velocity.linear.x - self.target_twist.linear.x) > 2:
-                    # Normalise the brake error as a fraction of (from ~25 mph)
-                    # meaning that 25 mph overspeed is maximum we are aiming for
-                    brake_error = (self.current_velocity.linear.x - self.target_twist.linear.x)/10;
-                    
-                rospy.loginfo('@_1 Computing PID vel_err %s & brk_err %s',str((self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704), str(brake_error))
-                
-                # Pass in the normalized velocity error to the controller
-                t, b, s = self.controller.control(error_velocity = (self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704, error_brake = brake_error)
-            
-                if not self.dbw_enabled:
-                    self.controller.reset()
-            
-                if brake_error == 0:
-                    b = 0
-                b *= 10000
-                s = self.yaw_controller.get_steering(linear_velocity=self.target_twist.linear.x, 
-                                    angular_velocity=self.target_twist.angular.z, 
-                                    current_velocity=self.current_velocity.linear.x)
-            
-                rospy.loginfo('@_1 PID OUT: THR %s BRK %s YAW %s', str(t), str(b), str(s))
-                # TODO: Get predicted throttle, brake, and steering using `twist_controller`
-                # You should only publish the control commands if dbw is enabled
-                # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
-                #                                                     <proposed angular velocity>,
-                #                                                     <current linear velocity>,
-                #                                                     <dbw status>,
-                #                                                     <any other argument you need>)
-                #if  self.dbw_enabled:
-                self.publish(t,b,s)
-
+            if self.mode == self.CONTROL_GO:
+                self.mode_go()
+            else:
+                self.mode_stop()
             rate.sleep()
 
     def publish(self, throttle, brake, steer):

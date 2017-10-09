@@ -136,17 +136,30 @@ class TLDetector(object):
         of times till we start using it. Otherwise the previous stable state is
         used.
         '''
-        if self.state != state:
-            self.state_count = 0
-            self.state = state
-        elif (self.state_count >= STATE_COUNT_THRESHOLD) and (light_wp < 100000):  # sometimes there's no light to publish (inf)
-            self.last_state = self.state
-            #light_wp = light_wp if state == TrafficLight.RED else -1  # TODO: put this back when we Classify
-            self.last_wp = light_wp
-            self.upcoming_red_light_pub.publish(Int32(light_wp))
-        else:
-            self.upcoming_red_light_pub.publish(Int32(self.last_wp))
-        self.state_count += 1
+
+        # FIXME -- temporarily disabling the THRESHOLD LOGIC, Uncomment later
+        # As long as we are using truth data, assume it is perfect and no need
+        # to count.  Too late to think about getting everything right! :)
+#        if self.state != state:
+#            self.state_count = 0
+#            self.state = state
+#        elif (self.state_count >= STATE_COUNT_THRESHOLD) and (light_wp < 100000):  # sometimes there's no light to publish (inf)
+#            self.last_state = self.state
+#            #light_wp = light_wp if state == TrafficLight.RED else -1  # TODO: put this back when we Classify
+#            self.last_wp = light_wp
+#            self.upcoming_red_light_pub.publish(Int32(light_wp))
+#        else:
+#            self.upcoming_red_light_pub.publish(Int32(self.last_wp))
+#        self.state_count += 1
+        if light_wp >= 0:
+            if state == TrafficLight.RED:
+                self.upcoming_red_light_pub.publish(Int32(light_wp))
+            elif state == TrafficLight.YELLOW:
+                # Are we getting too clever for our own good?
+                # Negative index is a yellow light
+                self.upcoming_red_light_pub.publish(Int32(-light_wp))
+            else:
+                self.upcoming_red_light_pub.publish(Int32(-len(self._map_x)))
 
     def get_closest_waypoint(self, point):
         """Identifies the closest path waypoint to the given position
