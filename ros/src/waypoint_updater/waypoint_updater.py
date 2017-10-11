@@ -423,8 +423,8 @@ class WaypointUpdater(object):
         #        far enough that we will have time to stop
         LOOKAHEAD_DIST = 100 # meters
 
-        s_back, _ = self.world.frenet_to_cartesian(my_s-PAST_TOL, 0)
-        orig_x, orig_y = self.world.cartesian_to_frenet(s_back, 0, heading)
+        s_back = my_s-PAST_TOL
+        orig_x, orig_y = self.world.frenet_to_cartesian(s_back, 0)
         self.hold_pos = self.world.traffic_lights_in_range(orig_x, orig_y, heading, LOOKAHEAD_DIST)
 
         # Set the path we must follow, i.e. spline the road
