@@ -1,13 +1,13 @@
-python object_detection/train.py --logtostderr --pipeline_config_path=PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config --train_dir=PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/train
+python object_detection/train.py --logtostderr --pipeline_config_path=/home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config --train_dir=/home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/train
 
 
-python object_detection/eval.py --logtostderr --pipeline_config_path=PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config --checkpoint_dir=PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/train --eval_dir=PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/eval
+python object_detection/eval.py --logtostderr --pipeline_config_path=/home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config --checkpoint_dir=/home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/train --eval_dir=/home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/eval
 
-tensorboard --logdir=PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config
+tensorboard --logdir=/home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config
 
 
 python object_detection/export_inference_graph.py \
     --input_type image_tensor \
-    --pipeline_config_path PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config  \
-    --trained_checkpoint_prefix PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/train \
-    --output_directory PATH_TO_BE_CONFIGURED/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/output_inference_graph_v1/
+    --pipeline_config_path /home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/ssd_mobilenet_v1_tldt.config  \
+    --trained_checkpoint_prefix /home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/models/model/train \
+    --output_directory /home/j3/dev/projects/personal/Udacity/CarND-Capstone/workspaces/custom_traffic_light_detection_workspace/objdetect/output_inference_graph_v1/
