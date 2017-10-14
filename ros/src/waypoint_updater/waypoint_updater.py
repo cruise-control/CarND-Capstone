@@ -5,12 +5,14 @@ from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import Quaternion
 from styx_msgs.msg import Lane, Waypoint, TrafficLightArray
 from std_msgs.msg import Int32
+from geometry_msgs.msg import TwistStamped
 import Utility
 import math
 import time
 import numpy as np
-
+from scipy.spatial import KDTree
 from threading import Lock
+from copy import deepcopy
 
 '''
 This node will publish waypoints from the car's current position to some `x` distance ahead.
@@ -40,149 +42,325 @@ Steps:
 '''
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
+SPEED_LIMIT= 15
+MAX_DECEL = 1.0
 
-#class Vehicle(object):
-#    pose
-#
-#    def __init(self):
-#        pass
-#
-#    def update_pose(self, msg):
-#        # Set the pose - PoseStamped.Pose
-#        self.pose = msg.pose
-#
-#    def position_xyz(self):
-#        return self.pose.position.x,self.pose.position.y,self.pose.position.z
-#
-#    def position_frenet(self):
-#        pass
+# FIXME! Magic number alert!
+# FIXME - These belong in the world model
+# Timed these, very approximate
+RED_LIGHT_TIME = 20.0
+YELLOW_LIGHT_TIME = 2.0
+GREEN_LIGHT_TIME = 4.0
+RED = 2
+YELLOW = 1
+GREEN = 0
+
+# FIXME! More magic numbers!
+HOLD_TOL = 7 # Command hold this far before (meters)
+PAST_TOL = 7 # Tolate going past by this much (meters), FIXME does this make sense?
+
+class World(object):
+
+    @staticmethod
+    def distance(x0, y0, x1, y1):
+        return math.sqrt((x0-x1)**2 + (y0-y1)**2)
 
 
+    def __init__(self):
+        rospy.loginfo("Initializing world model")
+
+        # Red light locations
+        self._red_light_lock = Lock()
+        self._red_light_wp = None
+
+        # Map waypoints
+        self._map_x = []
+        self._map_y = []
+        self._map_s = []
+        self._map_kd_tree = None
+
+        # Block until we get the road waypoints
+        waypoints = rospy.wait_for_message('/base_waypoints', Lane)
+        self._update_map_waypoints(waypoints.waypoints)
+        self.waypoints = waypoints.waypoints
+
+        # Subscribe to traffic waypoints
+        rospy.Subscriber('/traffic_waypoint', Int32, self._traffic_cb)
+
+
+    def _update_map_waypoints(self, waypoints):
+        for wp in waypoints:
+            self._map_x.append(wp.pose.pose.position.x)
+            self._map_y.append(wp.pose.pose.position.y)
+
+        # Generate the s map
+        self._map_s = Utility.generateMapS(self._map_x, self._map_y)
+
+        # KDTree for nearest neighbor searches
+        self._map_kd_tree = KDTree(zip(self._map_x, self._map_y))
+
+
+    def _traffic_cb(self, msg):
+        self._red_light_lock.acquire()
+        self._red_light_wp = int(msg.data)
+        self._red_light_lock.release()
+
+
+    def _road_distance(self, waypoints, wp1, wp2):
+        '''
+        Get the distance between waypoints indexed by wp1 and wp2.
+        This returns the sum of the euclidean distance between
+        all intermediate waypoints
+        '''
+        dist = 0
+        dl = lambda a, b: math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2  + (a.z-b.z)**2)
+        for i in range(wp1, wp2+1):
+            dist += dl(waypoints[wp1].pose.pose.position, waypoints[i].pose.pose.position)
+            wp1 = i
+        return dist
+
+
+    def closest_waypoint(self, x, y):
+        ''' Find closest waypoint to given x,y
+        '''
+        d, idx = self._map_kd_tree.query((x,y))
+        return idx
+
+
+    def next_waypoint(self, x, y, theta):
+        '''
+        Get the next waypoint in front of the vehicle
+        '''
+        idx = self.closest_waypoint(x,y)
+        mx = self._map_x[idx]
+        my = self._map_y[idx]
+        heading = math.atan2((my-y),(mx-x))
+        angle = abs(theta - heading)
+        if angle > math.pi / 4:
+            idx += 1
+        idx %= len(self._map_x)
+        return idx
+
+
+    def cartesian_to_frenet(self, x, y, theta):
+        '''
+        Convert from x / y coordinates to Frenet coordinates
+        '''
+
+        # FIXME - this really doesn't need the vehicle heading if we pick
+        # the segment a little more thoughtfully, GHP
+
+        # Get next waypoint index and previous one. Handle wrap around
+        next_idx = self.next_waypoint(x,y,theta)
+        prev_idx = next_idx - 1
+        if next_idx == 0:
+            prev_idx = len(self._map_x) - 1
+
+        # Find project of x onto n
+        nx = self._map_x[next_idx] - self._map_x[prev_idx]
+        ny = self._map_y[next_idx] - self._map_y[prev_idx]
+        xx = x -  self._map_x[prev_idx]
+        yy = y -  self._map_y[prev_idx]
+
+        proj_norm = (xx*nx + yy*ny)/(nx*nx + ny*ny)
+        proj_x = proj_norm * nx
+        proj_y = proj_norm * ny
+
+        frenet_d = self.distance(xx,yy,proj_x,proj_y)
+
+        # See if d should be positive or negative
+        c_x = 1000-self._map_x[prev_idx]
+        c_y = 2000-self._map_y[prev_idx]
+        c_pos = self.distance(c_x,c_y,xx,yy)
+        c_ref = self.distance(c_x,c_y,proj_x,proj_y)
+
+        if(c_pos <= c_ref):
+            frenet_d *= -1
+
+        frenet_s = 0
+        for i in range(0,prev_idx):
+            frenet_s += self.distance(self._map_x[i],self._map_y[i],self._map_x[i+1],self._map_y[i+1])
+
+        frenet_s += self.distance(0,0,proj_x,proj_y)
+
+        # This final distance is weird... return it and offset X
+        return frenet_s,frenet_d
+
+
+    def frenet_to_cartesian(self, s, d):
+        prev_idx = -1
+        while(s > self._map_s[prev_idx+1] and prev_idx < len(self._map_s)-2):
+            prev_idx += 1;
+        wp = (prev_idx+1) % len(self._map_s)
+
+        heading = math.atan2(self._map_y[wp]-self._map_y[prev_idx], self._map_x[wp]-self._map_x[prev_idx])
+        seg_s = s - self._map_s[prev_idx]
+
+        seg_x = self._map_x[prev_idx] + seg_s * math.cos(heading)
+        seg_y = self._map_y[prev_idx] + seg_s * math.sin(heading)
+
+        p_heading = heading - math.pi/2
+
+        x = seg_x + d*math.cos(p_heading)
+        y = seg_y + d*math.sin(p_heading)
+
+        return x, y
+
+
+    def traffic_lights_in_range(self, x, y, yaw, rng):
+        '''Return upcoming traffic lights, return its cartesian position
+
+        Starting from position <x,y>, look ahead <rng> meters for traffic lights
+        '''
+        # Acquire current red light idx
+        self._red_light_lock.acquire()
+        wp_idx = self._red_light_wp
+        self._red_light_lock.release()
+
+        if wp_idx is None:
+            return None
+
+        # Reject invalid waypoints
+        if wp_idx >= len(self._map_x) or wp_idx <= -len(self._map_x):
+            return None
+
+        # Using negative indices for yellow lights
+        # For now, treat them the same
+        if wp_idx < 0:
+            wp_idx = -wp_idx;
+
+        rospy.loginfo('red_light_wp_idx: %d', wp_idx)
+        wp_x = self._map_x[wp_idx]
+        wp_y = self._map_y[wp_idx]
+
+        # Convert origin position to frenet, and look out rng meters
+        s, d = self.cartesian_to_frenet(x, y, yaw)
+        end_x, end_y = self.frenet_to_cartesian(s+rng, 0)
+        end_idx = self.closest_waypoint(end_x, end_y)
+
+        # If the traffic light is within range, return it
+        if wp_idx <= end_idx:
+            return wp_x, wp_y
+        else:
+            return None
 
 
 class WaypointUpdater(object):
-#    self.vehicle = Vehicle()
-    waypoints = None
-    pose = None
-    prev_pose = None
-    heading = None
-    s = None
-    d = None
-    map_x = None
-    map_y = None
-    map_s = None
-    generated_waypoints = []
-    minIdx = -1
-    mutex = Lock()
-    traffic_light_map = None
 
-    def __init__(self):
-        rospy.init_node('waypoint_updater')
+    # Vehicle states
+    START          = 0
+    CRUISE         = 1
+    APPROACH       = 2
+    HOLD           = 3
+    EMERGENCY_STOP = 4
 
-        rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
-        rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
+    # Control modes
+    CONTROL_GO = 0
+    CONTROL_STOP = 1
 
-        # subscriber for /traffic_waypoint from tl_detector/tl_detector
-        # upcoming *red* light index in waypoints of nearest waypoint (else -1)
-        # published at camera frequency
-        rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
+    def __init__(self, world):
 
-        #rospy.Subscriber('/obstacle_waypoint', Int32, self.obstacle_cb)
+        rospy.Subscriber('/current_pose', PoseStamped, self._pose_cb)
+        rospy.Subscriber('/current_velocity', TwistStamped, self._current_velocity_cb)
+        #rospy.Subscriber('/obstacle_waypoint', Int32, self._obstacle_cb)
 
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
-        self.seq = 0
+        self.control_mode_pub = rospy.Publisher('/control_mode', Int32, queue_size=1)
 
-        # TODO: Add other member variables you need below
+        # Road data
+        self.world = world
 
-        #rospy.spin()
-        self.loop()
+        # Ego data
+        self.POSE_HIST_SZ = 2 # Save last 2 poses received
+        self._pose_lock = Lock()
+        self._pose_hist = []
+        self._current_vel_lock = Lock()
+        self._current_vel = None
 
-    def pose_cb(self, msg):
-        self.prev_pose = self.pose
-        self.pose = msg.pose
-        quaternion = (
-            self.pose.orientation.x,
-            self.pose.orientation.y,
-            self.pose.orientation.z,
-            self.pose.orientation.w)
-        self.heading = Utility.getHeading(quaternion)
-
-    def ddDistance(self,x1,y1,x2,y2):
-        return math.sqrt((x2-x1)**2 + (y2-y1)**2)
-
-
-    def getSimpleMapPath(self):
-        DEBUG = False
-        
-        start = time.time()
-        
-        newIdx = Utility.nextWaypoint(self.pose.position.x, self.pose.position.y, self.heading, self.map_x, self.map_y, last_idx=self.minIdx)
-        end = time.time()
-        
-        newIdx %= len(self.map_x)
-        if DEBUG:
-            rospy.loginfo('@_2 C exeTime %s X,Y (%s,%s) MX,My (%s,%s) NextIDX %s LenWaypoints %s heading %s',
-            str(end - start),
-            str(self.pose.position.x),
-            str(self.pose.position.y),
-            str(self.waypoints[newIdx].pose.pose.position.x),
-            str(self.waypoints[newIdx].pose.pose.position.y),
-            str(self.minIdx),
-            str(len(self.waypoints)),
-            self.heading )
-
-        self.minIdx = newIdx
-
+        # Plan data
         self.generated_waypoints = []
-        for wp in range(LOOKAHEAD_WPS):
-            idx = (self.minIdx+wp)%len(self.waypoints)
-            self.generated_waypoints.append(self.waypoints[idx])
-            # Cross track error causes the target velocity to decrease (does not recover)
-            if self.minIdx > 6000 and self.minIdx < 7000:
-                self.set_waypoint_velocity(self.generated_waypoints,wp,10)
-            else:
-                self.set_waypoint_velocity(self.generated_waypoints,wp,20)
-    
+        self.hold_pos = None
 
-    def getSplinePath(self):
+        # FSM
+        self._states = {self.START: self.st_start,
+                        self.CRUISE: self.st_cruise,
+                        self.APPROACH: self.st_approach,
+                        self.HOLD: self.st_hold}
+        self._state = self.START
+
+        # Initialize system control mode
+        self.control_mode_pub.publish(Int32(self.CONTROL_STOP))
+
+
+    def _pose_hist_append(self, pose):
+        self._pose_lock.acquire()
+        if len(self._pose_hist) >= self.POSE_HIST_SZ:
+            self._pose_hist.pop(0)
+        self._pose_hist.append(pose)
+        self._pose_lock.release()
+
+
+    def _pose_cb(self, msg):
+        self._pose_hist_append(msg.pose)
+
+
+    def _current_velocity_cb(self, msg):
+        self._current_vel_lock.acquire()
+        self._current_vel = msg
+        self._current_vel_lock.release()
+
+
+    def _obstacle_cb(self, msg):
+        # TODO: Callback for /obstacle_waypoint message. We will implement it later
+        pass
+
+
+    def vel(self):
+        self._current_vel_lock.acquire()
+        current_vel = self._current_vel
+        self._current_vel_lock.release()
+        return current_vel
+
+
+    def pose_hist(self, num=1):
+        '''Getter for vehicle pose history
+
+        Return the last <num> poses
+        '''
+        poses = []
+        if num>0:
+            self._pose_lock.acquire()
+            num = min(num, len(self._pose_hist))
+            if num>0:
+                poses.extend(deepcopy(self._pose_hist[-num:]))
+            self._pose_lock.release()
+
+        return poses
+
+
+    def getSplinePath(self, pose, heading, velocity=None):
+
+        # TODO pass in velocity
+
         start = time.time()
 
-        self.s, self.d = Utility.convertToFrenet(
-        self.pose.position.x,
-        self.pose.position.y,
-        self.heading,
-        self.map_x,
-        self.map_y)
+        # Get frenet coordinates
+        s, d = self.world.cartesian_to_frenet(pose.position.x, pose.position.y, heading)
 
         # Setup the Coordinates to get the spline between
-        px = []
-        py = []
-        if Utility.distance(self.prev_pose.position.x, self.prev_pose.position.y,
-        self.pose.position.x, self.pose.position.y) > 15:
-            px.append(self.prev_pose.position.x)
-            py.append(self.prev_pose.position.y)
-        px.append(self.pose.position.x)
-        py.append(self.pose.position.y)
-
-        # Get the next waypoint
-        newIdx = Utility.nextWaypoint(
-        self.pose.position.x,
-        self.pose.position.y,
-        self.heading,
-        self.map_x,
-        self.map_y,
-        last_idx=self.minIdx)
-        
-        self.minIdx = newIdx % len(self.waypoints)
-
-        # Add N future waypoints to the match list
+        # Append 20 points at increments of (15 + [0:19]*5) m
+        # FIXME: This is close to the first cut logic by S.C. but switched to
+        # increment in meters rather than waypoint index.  Instead, should use
+        # lookahead time to make sure we don't plan beyond the end of the spline
+        px = [pose.position.x]
+        py = [pose.position.y]
         for i in range(20):
-            idx = newIdx + 15 + i * 5
-            idx %= len(self.map_x)
-            px.append(self.map_x[idx])
-            py.append(self.map_y[idx])
+            plan_s = s + 15 + i*5
+            plan_d = 0
+            plan_x, plan_y = self.world.frenet_to_cartesian(plan_s, plan_d)
+            px.append(plan_x)
+            py.append(plan_y)
 
-        rospy.loginfo( '@_2 nextIdx %s heading %s X %s Y %s %s %s', newIdx, self.heading, self.pose.position.x, self.pose.position.y, px, py )
         # Fit the spline
         tkc = Utility.getSplineCoeffs(px, py)
 
@@ -205,61 +383,194 @@ class WaypointUpdater(object):
             wp.twist.header.stamp = rospy.Time(0)
             wp.twist.header.frame_id = '/world'
             pts.append(wp)
-            self.set_waypoint_velocity(pts,index,20)
+            self.set_waypoint_velocity(pts,index,0)
             index += 1
             if index > range(LOOKAHEAD_WPS):
                 break
 
         self.generated_waypoints = pts
 
-    def loop(self):
-        rate = rospy.Rate(1) # N Hz
-        while not rospy.is_shutdown():
-            if self.waypoints and self.pose and self.prev_pose:
-                if True:
-                    self.getSplinePath()
-                else:
-                    self.getSimpleMapPath()
-                # Create a new lane message type
-                l = Lane()
-                l.header.frame_id = '/world'
-                l.header.stamp = rospy.Time(0)
-                l.waypoints = self.generated_waypoints
 
-                # Publish the generated message
-                self.final_waypoints_pub.publish(l)
+    def loop(self):
+        rate = rospy.Rate(2) # N Hz
+        while not rospy.is_shutdown():
+            self.step()
             rate.sleep()
 
-    def waypoints_cb(self, waypoints):
-        # Update / set the current waypoints
-        self.waypoints = waypoints.waypoints
 
-        # Fill in the local map data
-        if self.map_x is None:
-            self.map_x = []
-            self.map_y = []
-            # Pull out the x and y waypoints
-            for wp in self.waypoints:
-                self.map_x.append(wp.pose.pose.position.x)
-                self.map_y.append(wp.pose.pose.position.y)
+    def plan(self):
+        '''Plan the next vehicle actions
+        '''
+        # Get last 2 ego poses
+        poses = self.pose_hist()
+        pose = poses[0]
+        quaternion = (
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w)
+        heading = Utility.getHeading(quaternion)
+        my_s, _ = self.world.cartesian_to_frenet(pose.position.x, pose.position.y, heading)
 
-            # Generate the s map
-            self.map_s = Utility.generateMapS(self.map_x, self.map_y)
+        # Get vehicle velocity
+        my_vel = self.vel()
+        my_speed = math.sqrt(my_vel.twist.linear.x**2 + my_vel.twist.linear.y**2)
 
-            # Convert to numpy arrays
-            #self.map_x = np.asarray(self.map_x)
-            #self.map_s = np.asarray(self.map_s)
-            #self.map_y = np.asarray(self.map_y)
+        # Look for upcoming traffic lights
+        # In the real world this would be a more generalized world
+        # model/obstacle map update
+        # FIXME! Magic number alert! Get current velocity and look ahead
+        #        far enough that we will have time to stop
+        LOOKAHEAD_DIST = 100 # meters
+
+        s_back = my_s-PAST_TOL
+        orig_x, orig_y = self.world.frenet_to_cartesian(s_back, 0)
+        self.hold_pos = self.world.traffic_lights_in_range(orig_x, orig_y, heading, LOOKAHEAD_DIST)
+
+        # Set the path we must follow, i.e. spline the road
+        # This currently doesn't take into account any obstacles, because we
+        # are not taking any evasive action other than to slow and/or stop
+        # Velocity profile is updated in the robot state functions, i.e. the
+        # planner tells the vehicle where to go, the state function decides
+        # how to do it.
+        rospy.loginfo('Getting spline path')
+        self.getSplinePath(pose, heading)
+
+        # Choose the correct state plan execute function
+        if self.hold_pos is None:
+            self._state = self.CRUISE
+        else:
+            hold_s, _ = self.world.cartesian_to_frenet(self.hold_pos[0], self.hold_pos[1], heading)
+            dtg = hold_s - my_s;
+
+            # TODO - Use time to intercept to tell if we should blow through a red light
+            #        Would have to get light state from world method, and more importantly,
+            #        would need to know when it turned yellow!
+            time_to_intercept = dtg/my_speed
+
+            if dtg < -PAST_TOL:
+                self._state = self.CRUISE
+            elif dtg > HOLD_TOL:
+                self._state = self.APPROACH
+            else:
+                self._state = self.HOLD
 
 
-    def traffic_cb(self, msg):
-        # TODO: Callback for /traffic_waypoint message. Implement
-        #self.lights = msg.lights
+    def st_start(self):
+        # This is just a stub so that the vehicle will do nothing if
+        # it hasn't chosen a starting state yet
         pass
 
-    def obstacle_cb(self, msg):
-        # TODO: Callback for /obstacle_waypoint message. We will implement it later
-        pass
+
+    def st_cruise(self):
+        self.control_mode_pub.publish(Int32(self.CONTROL_GO))
+
+        # Set velocity profile
+        self.set_constant_velocity_profile(SPEED_LIMIT)
+
+        # Create a new lane message type and publish it
+        l = Lane()
+        l.header.frame_id = '/world'
+        l.header.stamp = rospy.Time(0)
+        l.waypoints = self.generated_waypoints
+        self.final_waypoints_pub.publish(l)
+
+
+    def st_approach(self):
+        self.control_mode_pub.publish(Int32(self.CONTROL_GO))
+
+        # Set velocity profile
+        self.set_decelerate_profile(self.hold_pos)
+
+        # Create a new lane message type and publish it
+        l = Lane()
+        l.header.frame_id = '/world'
+        l.header.stamp = rospy.Time(0)
+        l.waypoints = self.generated_waypoints
+        self.final_waypoints_pub.publish(l)
+
+
+    def st_hold(self):
+        self.control_mode_pub.publish(Int32(self.CONTROL_STOP))
+
+
+    def step(self):
+        '''Main vehicle function
+        '''
+        if len(self._pose_hist)>=self.POSE_HIST_SZ:
+
+            # Call the planner
+            # This will set the current state exec function
+            self.plan()
+
+            # Call current state function
+            self._states[self._state]()
+
+
+    def set_velocity_profile(self):
+        '''Set the velocity profile for the planned path
+        '''
+        # Get pose data
+        pose = self.pose_hist()
+        pose = pose[0]
+        quaternion = (
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w)
+        heading = Utility.getHeading(quaternion)
+
+        # Decelerate to a point if necessary
+        if self.hold_pos is not None:
+            rospy.loginfo('Traffic light coming up @ (%f, %f)', self.hold_pos[0], self.hold_pos[1])
+            self.set_decelerate_profile(self.hold_pos)
+        else:
+            self.set_constant_velocity_profile(SPEED_LIMIT)
+
+
+    def set_constant_velocity_profile(self, vel):
+        for i in range(len(self.generated_waypoints)):
+            self.set_waypoint_velocity(self.generated_waypoints, i, vel)
+
+
+    def set_decelerate_profile(self, stop_pos):
+        # Decelerate the generated_waypoints like waypoint_loader/decelerate()
+        # first, find the generated_waypoint closest to the stop line
+        stop_x = stop_pos[0]
+        stop_y = stop_pos[1]
+
+        closest_wp = -1
+        closest_dist = float('inf')
+        for i in range(len(self.generated_waypoints)):
+            dist = World.distance(self.generated_waypoints[i].pose.pose.position.x,
+                                  self.generated_waypoints[i].pose.pose.position.y,
+                                  stop_x,
+                                  stop_y)
+            if(dist<closest_dist):
+                closest_wp = i
+                closest_dist = dist
+
+        # What if the last generated point is closest but it is still far from
+        # the light?
+        if closest_wp < len(self.generated_waypoints):
+
+            # then, come to a stop at the end waypoint/stop line
+            for i in range(0, closest_wp):  # since the first waypoint is where we are now
+                dist = World.distance(self.generated_waypoints[i].pose.pose.position.x,
+                                      self.generated_waypoints[i].pose.pose.position.y,
+                                      self.generated_waypoints[closest_wp].pose.pose.position.x,
+                                      self.generated_waypoints[closest_wp].pose.pose.position.y)
+
+                # Assume applying max decel to the stop point, this would be the velocity at that point
+                vel = math.sqrt(2*MAX_DECEL * dist)
+                vel = min(vel, SPEED_LIMIT)
+                if vel < 1.:
+                    vel = 0.
+                self.set_waypoint_velocity(self.generated_waypoints, i, vel)
+
+            # i is now closest waypoint, always set to 0.0 velocity
+            self.set_waypoint_velocity(self.generated_waypoints, i, 0)
+
 
     def get_waypoint_velocity(self, waypoint):
         return waypoint.twist.twist.linear.x
@@ -267,25 +578,19 @@ class WaypointUpdater(object):
     def set_waypoint_velocity(self, waypoints, waypoint, velocity):
         waypoints[waypoint].twist.twist.linear.x = velocity
 
-    def euclid_distance(self, pnta, pntb):
-        return math.sqrt((pnta.x-pntb.x)**2 + (pnta.y-pntb.y)**2  + (pnta.z-pntb.z)**2)
-
-    def distance(self, waypoints, wp1, wp2):
-        '''
-        Get the distance between waypoints indexed by wp1 and wp2.
-        This returns the sum of the euclidean distance between
-        all intermediate waypoints
-        '''
-        dist = 0
-        dl = lambda a, b: math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2  + (a.z-b.z)**2)
-        for i in range(wp1, wp2+1):
-            dist += dl(waypoints[wp1].pose.pose.position, waypoints[i].pose.pose.position)
-            wp1 = i
-        return dist
-
 
 if __name__ == '__main__':
     try:
-        WaypointUpdater()
+        rospy.init_node('waypoint_updater')
+
+        # The world constructor blocks waiting for the road waypoints
+        world = World()
+
+        # We have constructed a model of the world, get ready to start driving!
+        wpu = WaypointUpdater(world)
+
+        # .. and go
+        wpu.loop()
+
     except rospy.ROSInterruptException:
         rospy.logerr('Could not start waypoint updater node.')
