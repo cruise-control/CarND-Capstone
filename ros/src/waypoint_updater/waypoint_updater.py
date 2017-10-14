@@ -56,7 +56,7 @@ YELLOW = 1
 GREEN = 0
 
 # FIXME! More magic numbers!
-HOLD_TOL = 7 # Command hold this far before (meters)
+HOLD_TOL = 8 # Command hold this far before (meters)
 PAST_TOL = 7 # Tolate going past by this much (meters), FIXME does this make sense?
 
 class World(object):
@@ -392,7 +392,7 @@ class WaypointUpdater(object):
 
 
     def loop(self):
-        rate = rospy.Rate(2) # N Hz
+        rate = rospy.Rate(1) # N Hz
         while not rospy.is_shutdown():
             self.step()
             rate.sleep()
@@ -425,7 +425,13 @@ class WaypointUpdater(object):
 
         s_back = my_s-PAST_TOL
         orig_x, orig_y = self.world.frenet_to_cartesian(s_back, 0)
-        self.hold_pos = self.world.traffic_lights_in_range(orig_x, orig_y, heading, LOOKAHEAD_DIST)
+        hold_pos = self.world.traffic_lights_in_range(orig_x, orig_y, heading, LOOKAHEAD_DIST)
+        if hold_pos is not None:
+            # Find a point some margin behind the stop position to target
+            stop_s, _ = self.world.cartesian_to_frenet(hold_pos[0], hold_pos[1], heading)
+            self.hold_pos = self.world.frenet_to_cartesian(stop_s-HOLD_TOL/2, _)
+        else:
+            self.hold_pos = None
 
         # Set the path we must follow, i.e. spline the road
         # This currently doesn't take into account any obstacles, because we
