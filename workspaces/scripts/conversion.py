@@ -96,12 +96,12 @@ def pipeline(filepath, prefix):
 prefix = ''
 # Create a CSV formatted string with all of the information
 output = convertToCSV(None,None,None, header=True) + '\n'
-output += pipeline('./Simulation/via_region_data.csv', './Simulation')
+#output += pipeline('./Simulation/via_region_data.csv', './Simulation')
 output += pipeline('./RosBag/bag_region_data.csv', './RosBag')
 print(output)
       
 # Write it to a csv file
-with open('compiled_traffic_lights.csv', 'w') as the_file:
+with open('rosbag_compiled_traffic_lights.csv', 'w') as the_file:
     the_file.write(output)
 
 
