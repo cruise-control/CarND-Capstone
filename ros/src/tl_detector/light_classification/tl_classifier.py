@@ -87,7 +87,7 @@ class TLClassifier(object):
         boxes, scores, classes = self._filter_boxes(confidence_cutoff, boxes, scores, classes)
 
 
-        DEBUG_CLASSIFIER = False
+        DEBUG_CLASSIFIER = True
         if DEBUG_CLASSIFIER:
             height = image.shape[0]
             width = image.shape[1]
