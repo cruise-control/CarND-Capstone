@@ -84,7 +84,6 @@ def pipeline(filepath, prefix):
     shuffleList = []
     for box, f, l in zip(processed[0], filename, labels):
         shuffleList.append((box,f,l))
-        
     shuffle(shuffleList)
     
     entry = ''
@@ -96,7 +95,7 @@ def pipeline(filepath, prefix):
 prefix = ''
 # Create a CSV formatted string with all of the information
 output = convertToCSV(None,None,None, header=True) + '\n'
-#output += pipeline('./Simulation/via_region_data.csv', './Simulation')
+#output += pipeline('./Simulation_1/via_region_data.csv', './Simulation')
 output += pipeline('./RosBag/bag_region_data.csv', './RosBag')
 print(output)
       
