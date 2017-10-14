@@ -26,7 +26,10 @@ as well as to verify your TL classifier.
 
 TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
-
+LOOKAHEAD_WPS = 200
+LIMIT_TRAFFIC_LIGHT = 50
+LIMIT_DECELERATE = 50
+MAX_DECEL = 5
 '''
 Notes:
 The Waypoint position information is contained in the Pose position and orientation of the
@@ -301,6 +304,10 @@ class WaypointUpdater(object):
 
             # Generate the s map
             self.map_s = Utility.generateMapS(self.map_x, self.map_y)
+        self.waypoints_size = np.shape(waypoints.waypoints)[0]
+        self.lookahead_wps = min(LOOKAHEAD_WPS, self.waypoints_size//2)
+        self.max_velocity = self.get_waypoint_velocity(waypoints.waypoints[0])
+        self.limit_traffic_ahead = 1.8*self.max_velocity
 
             # Convert to numpy arrays
             #self.map_x = np.asarray(self.map_x)
@@ -311,6 +318,13 @@ class WaypointUpdater(object):
     def traffic_cb(self, msg):
         # TODO: Callback for /traffic_waypoint message. Implement
         #self.lights = msg.lights
+        if (msg.data >= 0):
+#            rospy.logwarn(msg)
+            self.traffic_point = msg.data
+            self.red_light_ahead = True
+        else:
+            self.traffic_point = None
+            self.red_light_ahead = False
         pass
 
     def obstacle_cb(self, msg):
