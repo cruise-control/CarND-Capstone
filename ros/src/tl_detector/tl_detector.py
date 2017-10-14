@@ -45,7 +45,6 @@ class TLDetector(object):
         self.bridge = CvBridge()
         self.light_classifier = TLClassifier()
         self.listener = tf.TransformListener()
-
         self.state = TrafficLight.UNKNOWN
         self.last_state = TrafficLight.UNKNOWN
         self.last_wp = -1
@@ -66,8 +65,8 @@ class TLDetector(object):
     def image_cb_test(self, msg):
         self.camera_image = msg
         cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
-
-        detector_image = self.light_classifier.get_classification(cv_image)
+        if self.light_classifier:
+            detector_image = self.light_classifier.get_classification(cv_image)
         #self.bbox_image_pub.publish(detector_image)
 
     def image_cb(self, msg):

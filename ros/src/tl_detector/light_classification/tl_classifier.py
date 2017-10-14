@@ -1,12 +1,37 @@
 import tensorflow as tf
 import numpy as np
+import rospy
 import cv2
 import os
 from cv_bridge import CvBridge
 
 from styx_msgs.msg import TrafficLight
 
+class TLState(object):
+    
+    def __init__(self):
+        self.now = TrafficLight.UNKNOWN
+        self.last = TrafficLight.UNKNOWN
+        self.x = -1
+        self.y = -1
+
+    def processClassifications(self, predictions, confidences):
+        '''Process new classifications.
+        
+        A simple voting mechanism. Take the label which has the highest sum
+        of confidences.
+        '''
+        self.last = self.now
+        if len(predictions) > 0:
+            res = {TrafficLight.RED:0,TrafficLight.YELLOW:0,TrafficLight.GREEN:0,TrafficLight.UNKNOWN:0}
+            for pred, conf in zip(predictions, confidences):
+                res[pred-1] += conf
+            self.now = max(res, key=res.get)
+        else:
+            self.now = TrafficLight.UNKNOWN
+
 class TLClassifier(object):
+                
     def __init__(self):
         #print os.getcwd()
         graph_file = './light_classification/model/frozen_inference_graph.pb'
@@ -29,6 +54,7 @@ class TLClassifier(object):
 
         self.COLOR_LIST = [(255,0,0),(255,255,0),(0,255,0)]
         self.bridge = CvBridge()
+        self.predictor = TLState()
         self.counter = 0
 
 
@@ -60,20 +86,27 @@ class TLClassifier(object):
 
         boxes, scores, classes = self._filter_boxes(confidence_cutoff, boxes, scores, classes)
 
-        height = image.shape[0]
-        width = image.shape[1]
-        box_coords = self._to_image_coords(boxes, height, width)
 
-        self._draw_boxes(image, box_coords, classes)
+        DEBUG_CLASSIFIER = False
+        if DEBUG_CLASSIFIER:
+            height = image.shape[0]
+            width = image.shape[1]
+            box_coords = self._to_image_coords(boxes, height, width)
 
-        cv2.imwrite('./light_classification/detection_images/{}.png'.format(str(self.counter).zfill(3)), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-        #return TrafficLight.UNKNOWN
-
-
-
-        ros_image = self.bridge.cv2_to_imgmsg(image, "rgb8")
-
-        return ros_image
+            self._draw_boxes(image, box_coords, classes)
+            cv2.imwrite('./light_classification/detection_images/{}.png'.format(str(self.counter).zfill(3)), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+        
+        self.predictor.processClassifications(classes, scores)
+        
+        DEBUG = True
+        if DEBUG:
+            label = {4:'UNKNOWN',2:'GREEN',1:'YELLOW',0:'RED'}
+            rospy.loginfo('@_4 TL Predicted: %s %s', self.predictor.now, label[self.predictor.now])
+        
+        return self.predictor.now
+        
+        #ros_image = self.bridge.cv2_to_imgmsg(image, "rgb8")
+        #return ros_image
 
     def _load_graph(self, graph_file):
         """Loads a frozen inference graph"""
