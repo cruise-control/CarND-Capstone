@@ -258,7 +258,7 @@ class TLDetector(object):
         if closest_light>-1:  # found one
             light = self.lights[closest_light]
 
-        rospy.loginfo('car wp: %s  light_wp: %s  light_index: %s  state: %s', car_wp, light_wp, closest_light, self.get_light_state(light))
+        rospy.loginfo('car wp: %s  light_wp: %s  light_index: %s  state: %s', car_wp, light_wp, closest_light, self.get_light_state())
 
         if light:
             state = self.get_light_state()
