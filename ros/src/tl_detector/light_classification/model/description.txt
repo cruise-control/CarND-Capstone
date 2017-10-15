@@ -1,1 +1,2 @@
 10_12_2017_Sim_Model_80k_Dataset1 from Shaun Cosgrove
+10_14_2017_RosBag Trained on the full RosBag dataset - 108K training steps with a batch size of 16. ~ 9 hours training on AWS
