@@ -244,7 +244,7 @@ class TLDetector(object):
             line_point.x = line[0]
             line_point.y = line[1]
             stop_wp = self.get_closest_waypoint(line_point)  # nearest waypoint to this stop line
-            if(stop_wp > car_wp):  # stop is ahead of us, not behind (waypoints ordered)
+            if(stop_wp > car_wp-5):  # stop is ahead of us, not behind (waypoints ordered)
                 if stop_wp < light_wp:  # here's a closer one
                     light_wp = stop_wp  # this is the one!  ...so far
 
