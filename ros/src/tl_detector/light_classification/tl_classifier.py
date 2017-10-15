@@ -56,6 +56,7 @@ class TLClassifier(object):
         self.bridge = CvBridge()
         self.predictor = TLState()
         self.counter = 0
+        self.skip = 0
 
 
     def get_classification(self, image):
@@ -96,9 +97,15 @@ class TLClassifier(object):
             self._draw_boxes(image, box_coords, classes)
             cv2.imwrite('./light_classification/detection_images/{}.png'.format(str(self.counter).zfill(3)), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
         
-        self.predictor.processClassifications(classes, scores)
+        # Hack to reduce processing to every second image
+        if self.skip >= 5:
+            self.predictor.processClassifications(classes, scores)
+            label = {4:'UNKNOWN',2:'GREEN',1:'YELLOW',0:'RED'}
+            rospy.loginfo('@_4 New Prediction: %s %s', self.predictor.now, label[self.predictor.now])
+            self.skip = 0
+        self.skip += 1
         
-        DEBUG = True
+        DEBUG = False
         if DEBUG:
             label = {4:'UNKNOWN',2:'GREEN',1:'YELLOW',0:'RED'}
             rospy.loginfo('@_4 TL Predicted: %s %s', self.predictor.now, label[self.predictor.now])

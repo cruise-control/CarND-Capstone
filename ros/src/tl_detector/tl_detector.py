@@ -30,7 +30,8 @@ class TLDetector(object):
         self.camera_image = None
         self.lights = []
         self._waypoint_tree = None
-
+        self.DEBUG_USE_TRUTH = True
+        
         # Base waypoints should only be published once
         # For now it's best to assume this because we don't take any special
         # care to re-initialize properly if we were to get a different set
@@ -102,20 +103,23 @@ class TLDetector(object):
             see tl_detector/light_publisher for examples
         """
         self.lights = msg.lights  # store for later
-        """
-        # only need the first time through
-        if(self.lights_pos_x == None):
+        
+        '''
+        if self.DEBUG_USE_TRUTH:
+            # only need the first time through
+            if(self.lights_pos_x == None):
+                for l in self.lights:
+                    ps = PoseStamped()
+                    ps = l.pose  # PoseStamped
+                    self.lights_pos_x.append(ps.pose.position.x)
+                    self.lights_pos_y.append(ps.pose.position.y)
+            
+            # constantly updating light colors - TODO: use until we get camera classifier working
+            self.states = []
             for l in self.lights:
-                ps = PoseStamped()
-                ps = l.pose  # PoseStamped
-                self.lights_pos_x.append(ps.pose.position.x)
-                self.lights_pos_y.append(ps.pose.position.y)
-        """
-        # constantly updating light colors - TODO: use until we get camera classifier working
-        #self.states = []
-        #for l in self.lights:
-        #    self.states.append(l.state)  # uint8 of RED(0), YELLOW(1), GREEN(2), UNKNOWN(4)
-        #rospy.loginfo('@_3 traffic_cb %s %s', self.lights_pos_x, self.lights_pos_y)
+                self.states.append(l.state)  # uint8 of RED(0), YELLOW(1), GREEN(2), UNKNOWN(4)
+            #rospy.loginfo('@_3 traffic_cb %s %s', self.lights_pos_x, self.lights_pos_y)
+        '''
 
 
 
@@ -205,10 +209,13 @@ class TLDetector(object):
 
         cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
 
+        #if self.DEBUG_USE_TRUTH:
+        #    # Get ground truth from topic
+        #   return light.state
+        #else:
         #Get classification
         return self.light_classifier.get_classification(cv_image)
-        # TODO: for now, get ground truth from topic
-        #return light.state
+            
 
 
     def process_traffic_lights(self):
@@ -258,7 +265,7 @@ class TLDetector(object):
         if closest_light>-1:  # found one
             light = self.lights[closest_light]
 
-        rospy.loginfo('car wp: %s  light_wp: %s  light_index: %s  state: %s', car_wp, light_wp, closest_light, self.get_light_state())
+        # rospy.loginfo('car wp: %s  light_wp: %s  light_index: %s  state: %s', car_wp, light_wp, closest_light, self.get_light_state())
 
         if light:
             state = self.get_light_state()
