@@ -429,9 +429,10 @@ class WaypointUpdater(object):
         if hold_pos is not None:
             # Find a point some margin behind the stop position to target
             stop_s, _ = self.world.cartesian_to_frenet(hold_pos[0], hold_pos[1], heading)
-            self.hold_pos = self.world.frenet_to_cartesian(stop_s-HOLD_TOL/2, _)
-        else:
-            self.hold_pos = None
+            hold_pos = self.world.frenet_to_cartesian(stop_s-HOLD_TOL/2, _)
+
+        # Save hold position
+        self.hold_pos = hold_pos
 
         # Set the path we must follow, i.e. spline the road
         # This currently doesn't take into account any obstacles, because we
