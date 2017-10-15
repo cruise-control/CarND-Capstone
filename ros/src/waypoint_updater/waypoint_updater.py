@@ -49,7 +49,7 @@ MAX_DECEL = 1.0
 # FIXME - These belong in the world model
 # Timed these, very approximate
 RED_LIGHT_TIME = 20.0
-YELLOW_LIGHT_TIME = 2.0
+YELLOW_LIGHT_TIME = 0.5
 GREEN_LIGHT_TIME = 4.0
 RED = 2
 YELLOW = 1
@@ -72,6 +72,7 @@ class World(object):
         # Red light locations
         self._red_light_lock = Lock()
         self._red_light_wp = None
+        self._red_light_time = None
 
         # Map waypoints
         self._map_x = []
@@ -103,6 +104,7 @@ class World(object):
     def _traffic_cb(self, msg):
         self._red_light_lock.acquire()
         self._red_light_wp = int(msg.data)
+        self._red_light_time = rospy.Time.now()
         self._red_light_lock.release()
 
 
@@ -215,6 +217,7 @@ class World(object):
         # Acquire current red light idx
         self._red_light_lock.acquire()
         wp_idx = self._red_light_wp
+        wp_time = self._red_light_time
         self._red_light_lock.release()
 
         if wp_idx is None:
@@ -227,7 +230,10 @@ class World(object):
         # Using negative indices for yellow lights
         # For now, treat them the same
         if wp_idx < 0:
-            wp_idx = -wp_idx;
+            wp_state = YELLOW
+            wp_idx = -wp_idx
+        else:
+            wp_state = RED
 
         rospy.loginfo('red_light_wp_idx: %d', wp_idx)
         wp_x = self._map_x[wp_idx]
@@ -240,7 +246,7 @@ class World(object):
 
         # If the traffic light is within range, return it
         if wp_idx <= end_idx:
-            return wp_x, wp_y
+            return wp_x, wp_y, wp_state, wp_time
         else:
             return None
 
@@ -280,6 +286,8 @@ class WaypointUpdater(object):
         # Plan data
         self.generated_waypoints = []
         self.hold_pos = None
+        self.hold_state = None
+        self.hold_time = None
 
         # FSM
         self._states = {self.START: self.st_start,
@@ -425,14 +433,22 @@ class WaypointUpdater(object):
 
         s_back = my_s-PAST_TOL
         orig_x, orig_y = self.world.frenet_to_cartesian(s_back, 0)
-        hold_pos = self.world.traffic_lights_in_range(orig_x, orig_y, heading, LOOKAHEAD_DIST)
-        if hold_pos is not None:
+        light = self.world.traffic_lights_in_range(orig_x, orig_y, heading, LOOKAHEAD_DIST)
+        if light is not None:
             # Find a point some margin behind the stop position to target
-            stop_s, _ = self.world.cartesian_to_frenet(hold_pos[0], hold_pos[1], heading)
-            hold_pos = self.world.frenet_to_cartesian(stop_s-HOLD_TOL/2, _)
-
-        # Save hold position
-        self.hold_pos = hold_pos
+            hold_x = light[0]
+            hold_y = light[1]
+            stop_s, _ = self.world.cartesian_to_frenet(hold_x, hold_y, heading)
+            self.hold_pos = self.world.frenet_to_cartesian(stop_s-HOLD_TOL/2, _)
+            self.hold_state = light[2]
+            # Save time of arrival of the message, but only when light changes
+            if self.hold_time is None:
+                self.hold_time = light[3]
+        else:
+            rospy.loginfo('no light!!!')
+            self.hold_pos = None
+            self.hold_state = None
+            self.hold_time = None
 
         # Set the path we must follow, i.e. spline the road
         # This currently doesn't take into account any obstacles, because we
@@ -440,7 +456,6 @@ class WaypointUpdater(object):
         # Velocity profile is updated in the robot state functions, i.e. the
         # planner tells the vehicle where to go, the state function decides
         # how to do it.
-        rospy.loginfo('Getting spline path')
         self.getSplinePath(pose, heading)
 
         # Choose the correct state plan execute function
@@ -454,8 +469,13 @@ class WaypointUpdater(object):
             #        Would have to get light state from world method, and more importantly,
             #        would need to know when it turned yellow!
             time_to_intercept = dtg/my_speed
+            if self.hold_state == RED:
+                time_to_red = -float('inf')
+            else:
+                yellow_time_elapsed = rospy.Time.now()-self.hold_time
+                time_to_red = YELLOW_LIGHT_TIME - yellow_time_elapsed.to_sec()
 
-            if dtg < -PAST_TOL:
+            if dtg < -PAST_TOL or time_to_intercept < time_to_red:
                 self._state = self.CRUISE
             elif dtg > HOLD_TOL:
                 self._state = self.APPROACH
