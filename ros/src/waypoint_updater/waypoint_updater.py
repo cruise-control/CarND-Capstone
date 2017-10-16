@@ -49,8 +49,9 @@ MAX_DECEL = 1.0
 # FIXME - These belong in the world model
 # Timed these, very approximate
 RED_LIGHT_TIME = 20.0
-YELLOW_LIGHT_TIME = 0.5
+YELLOW_LIGHT_TIME = 1.95
 GREEN_LIGHT_TIME = 4.0
+STICKY_APPROACH_HOLD_TIMEOUT = 2.0 # Unstick APPROACH or HOLD timeout
 RED = 2
 YELLOW = 1
 GREEN = 0
@@ -58,6 +59,7 @@ GREEN = 0
 # FIXME! More magic numbers!
 HOLD_TOL = 8 # Command hold this far before (meters)
 PAST_TOL = 7 # Tolate going past by this much (meters), FIXME does this make sense?
+LYEL_TOL = HOLD_TOL/1.3 # If red transitions and in this margin, will be a late yellow (tunable parameter)
 
 class World(object):
 
@@ -446,9 +448,29 @@ class WaypointUpdater(object):
                 self.hold_time = light[3]
         else:
             rospy.loginfo('no light!!!')
-            self.hold_pos = None
-            self.hold_state = None
-            self.hold_time = None
+            # Note: The below logic is inherently unsafe for real-world driving as upon
+            # having X seconds of invalid traffic light observations, it will result in
+            # the vehicle transitioning into CRUISE mode. This is ok for the scope of this
+            # project
+            
+            # If there is a prior hold time
+            if self.hold_time:
+                # Only clear the lights when there is a safe state to do so in
+                # Meaning, if we were previously approaching a light or already stopped
+                # don't transition to CRUISE if we get an UNKNOWN light classification.
+                # Only do that on positive classification or after a timeout in the event the 
+                # vehicle is not providing any classification information.
+                
+                # Allow state clearing if not getting any classifications for X seconds
+                timeout = (rospy.Time.now() - self.hold_time).to_sec() > STICKY_APPROACH_HOLD_TIMEOUT 
+                
+                if self._state != self.APPROACH and self._state != self.HOLD or timeout:
+                    rospy.loginfo('Sticky Approach / Hold timeout!!!')
+                    self.hold_pos = None
+                    self.hold_state = None
+                    self.hold_time = None
+                    
+                
 
         # Set the path we must follow, i.e. spline the road
         # This currently doesn't take into account any obstacles, because we
@@ -474,13 +496,23 @@ class WaypointUpdater(object):
             else:
                 yellow_time_elapsed = rospy.Time.now()-self.hold_time
                 time_to_red = YELLOW_LIGHT_TIME - yellow_time_elapsed.to_sec()
+                # Where will the vehicle be at the red light transition?
+                pos_at_red_transition = my_s + my_speed * time_to_red
+                # Will that result in a late yellow?
+                if pos_at_red_transition >= hold_s - LYEL_TOL:
+                    # Yes, then set time to red as the time to intercept
+                    time_to_red = time_to_intercept
+                    rospy.loginfo('Late Yellow!!!')
 
             if dtg < -PAST_TOL or time_to_intercept < time_to_red:
                 self._state = self.CRUISE
-            elif dtg > HOLD_TOL:
+            elif dtg > HOLD_TOL or time_to_intercept == time_to_red:
                 self._state = self.APPROACH
             else:
                 self._state = self.HOLD
+            
+        # Update the prior state
+        self.last_hold_state = self.hold_state
 
 
     def st_start(self):
