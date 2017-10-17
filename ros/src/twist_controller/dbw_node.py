@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
-import rospy
-from std_msgs.msg import Bool
 from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
 from geometry_msgs.msg import TwistStamped
 from std_msgs.msg import Int32
+from std_msgs.msg import Bool
+from threading import Lock
+import rospy
 import math
 
 from twist_controller import Controller
@@ -40,6 +41,11 @@ class DBWNode(object):
     CONTROL_GO = 0
     CONTROL_STOP = 1
 
+    @staticmethod
+    def mph2mps(mph):
+        CONVERSION_FACTOR = 0.44704
+        return mph * CONVERSION_FACTOR
+
     def __init__(self):
         rospy.init_node('dbw_node')
 
@@ -61,8 +67,9 @@ class DBWNode(object):
         self.brake_pub = rospy.Publisher('/vehicle/brake_cmd',
                                          BrakeCmd, queue_size=1)
 
-        self.yaw_controller = YawController(wheel_base,steer_ratio,0.0,max_lat_accel,max_steer_angle)
-        self.controller = Controller()
+        self._controller = Controller(wheel_base,steer_ratio,0.0,max_lat_accel,max_steer_angle)
+        
+        self._mode_lock = Lock()
 
         # Subscribe to all topics
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cb)
@@ -90,26 +97,24 @@ class DBWNode(object):
         '''
         
         self.current_velocity = cv.twist
-        #self.current_velocity.linear.x *= 0.44704 # convert to m/s from mph
-        rospy.loginfo('@_1 Curr velx %s yawdot %s', str(self.current_velocity.linear.x), str(self.current_velocity.angular.z))
 
+        rospy.loginfo('@_1 Curr velx %s yawdot %s', str(self.current_velocity.linear.x), str(self.current_velocity.angular.z))
     
     def dbw_enabled_cb(self, dbw):
         self.dbw_enabled = bool(dbw.data)
         
-
     def twist_cb(self, twistCommand):
-        '''
-        Pull in the TwistCommand
-        '''
+        '''Pull in the TwistCommand.'''
+        
         self.target_twist = twistCommand.twist
         rospy.loginfo('@_1 Target velx %s yawdot %s', str(twistCommand.twist.linear.x), str(twistCommand.twist.angular.z))
 
-
     def control_mode_cb(self, msg):
-        # TODO -- Need a lock
+        '''Get the mode message.'''
+        
+        self._mode_lock.acquire()
         self.mode = int(msg.data)
-
+        self._mode_lock.release()
 
     def mode_go(self):
         '''Go control mode
@@ -120,47 +125,46 @@ class DBWNode(object):
 
             brake_error = 0
             
+            # Normalise the brake error as a fraction of 25 mph
+            # meaning that 25 mph overspeed is maximum this will assume the system will achieve
             if(self.current_velocity.linear.x - self.target_twist.linear.x) > 2:
-                # Normalise the brake error as a fraction of (from ~25 mph)
-                # meaning that 25 mph overspeed is maximum we are aiming for
-                brake_error = (self.current_velocity.linear.x - self.target_twist.linear.x)/10;
+                brake_error = (self.current_velocity.linear.x - self.target_twist.linear.x)/DBWNode.mph2mps(25);
                 
-            rospy.loginfo('@_1 Computing PID vel_err %s & brk_err %s',str((self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704), str(brake_error))
+            rospy.loginfo('@_1 Computing PID vel_err %s & brk_err %s',str((self.target_twist.linear.x  - self.current_velocity.linear.x)/DBWNode.mph2mps(100)), str(brake_error))
             
-            # Pass in the normalized velocity error to the controller
-            t, b, s = self.controller.control(error_velocity = (self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704, error_brake = brake_error)
-        
+            # Pass in the normalized velocity error, brake error and steering values to the controller
+            t, b, s = self._controller.control(
+                error_velocity = (self.target_twist.linear.x  - self.current_velocity.linear.x)/DBWNode.mph2mps(100), 
+                error_brake = brake_error, 
+                yaw_values=(self.target_twist.linear.x, 
+                            self.target_twist.angular.z, 
+                            self.current_velocity.linear.x)
+                )
+            
+            # If the human driver is driving then reset the controller
             if not self.dbw_enabled:
-                self.controller.reset()
+                self._controller.reset()
         
-            if brake_error == 0:
-                b = 0
-            b *= 10000
-            s = self.yaw_controller.get_steering(linear_velocity=self.target_twist.linear.x, 
-                                angular_velocity=self.target_twist.angular.z, 
-                                current_velocity=self.current_velocity.linear.x)
+            # If there is no brake error, zero out any command
+            #if brake_error == 0:
+            #    b = 0
+            # Scale b up by maximum torque as listed in the brake command message
+            b *= BrakeCmd.TORQUE_MAX
         
             rospy.loginfo('@_1 PID OUT: THR %s BRK %s YAW %s', str(t), str(b), str(s))
-            # TODO: Get predicted throttle, brake, and steering using `twist_controller`
-            # You should only publish the control commands if dbw is enabled
-            # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
-            #                                                     <proposed angular velocity>,
-            #                                                     <current linear velocity>,
-            #                                                     <dbw status>,
-            #                                                     <any other argument you need>)
-#            if self.dbw_enabled:
-            self.publish(t,b,s)
-#            else:
-#                self.controller.reset()
 
+            # If the human driver is not driving then publish commands
+            if self.dbw_enabled:
+                self.publish(t,b,s)
+            else:
+                self._controller.reset()
 
     def mode_stop(self):
         '''Stop control mode
         Just hold the brake to the floor!
         '''
         self.publish(0, 100000, 0)
-        self.controller.reset()
-
+        self._controller.reset()
 
     def loop(self):
         rate = rospy.Rate(10) # NHz
