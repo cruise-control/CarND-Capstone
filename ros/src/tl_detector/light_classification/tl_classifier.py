@@ -8,10 +8,12 @@ from cv_bridge import CvBridge
 from styx_msgs.msg import TrafficLight
 
 class TLState(object):
+    MAX_GUESS = 3
     
     def __init__(self):
         self.now = TrafficLight.UNKNOWN
         self.last = TrafficLight.UNKNOWN
+        self.guess_count = 0
         self.x = -1
         self.y = -1
 
@@ -21,14 +23,26 @@ class TLState(object):
         A simple voting mechanism. Take the label which has the highest sum
         of confidences.
         '''
-        self.last = self.now
-        if len(predictions) > 0:
+        
+        if len(predictions) > 0: # There is a prediction
             res = {TrafficLight.RED:0,TrafficLight.YELLOW:0,TrafficLight.GREEN:0,TrafficLight.UNKNOWN:0}
             for pred, conf in zip(predictions, confidences):
                 res[pred-1] += conf
             self.now = max(res, key=res.get)
-        else:
-            self.now = TrafficLight.UNKNOWN
+            self.guess_count = 0  # Clear guess counter
+        else: # There is no prediction
+            # If the last light was a Red or Yellow, then set output to Red
+            if self.last == TrafficLight.YELLOW or self.last == TrafficLight.RED:
+                self.now = TrafficLight.RED
+                # After N guesses, revert to unknown
+                if self.guess_count > MAX_GUESS: 
+                    self.now = TrafficLight.UNKNOWN
+                self.guess_count +=1
+            else:
+                self.now = TrafficLight.UNKNOWN
+                self.guess_count = 0
+                
+        self.last = self.now
 
 class TLClassifier(object):
                 
@@ -74,7 +88,7 @@ class TLClassifier(object):
         self.counter += 1
 
         # Hack to reduce processing to every second image
-        if self.skip >= 5:
+        if self.skip >= 3:
             
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             image_np = np.expand_dims(np.asarray(image, dtype=np.uint8), 0)
