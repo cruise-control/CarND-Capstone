@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import rospy
+from threading import Lock
 from std_msgs.msg import Int32
 from geometry_msgs.msg import PoseStamped, Pose, Point
 from styx_msgs.msg import TrafficLightArray, TrafficLight
@@ -31,6 +32,7 @@ class TLDetector(object):
         self.lights = []
         self._waypoint_tree = None
         self.DEBUG_USE_TRUTH = True
+        self._image_lock = Lock()
         
         # Base waypoints should only be published once
         # For now it's best to assume this because we don't take any special
@@ -103,24 +105,6 @@ class TLDetector(object):
             see tl_detector/light_publisher for examples
         """
         self.lights = msg.lights  # store for later
-        
-        '''
-        if self.DEBUG_USE_TRUTH:
-            # only need the first time through
-            if(self.lights_pos_x == None):
-                for l in self.lights:
-                    ps = PoseStamped()
-                    ps = l.pose  # PoseStamped
-                    self.lights_pos_x.append(ps.pose.position.x)
-                    self.lights_pos_y.append(ps.pose.position.y)
-            
-            # constantly updating light colors - TODO: use until we get camera classifier working
-            self.states = []
-            for l in self.lights:
-                self.states.append(l.state)  # uint8 of RED(0), YELLOW(1), GREEN(2), UNKNOWN(4)
-            #rospy.loginfo('@_3 traffic_cb %s %s', self.lights_pos_x, self.lights_pos_y)
-        '''
-
 
 
     def image_cb_test(self, msg):
@@ -140,8 +124,12 @@ class TLDetector(object):
             msg (Image): image from car-mounted camera
 
         """
+        
+        # Place a lock around the getting of the image
+        self._image_lock.acquire()
         self.has_image = True
         self.camera_image = msg
+        self._image_lock.release()
 
         light_wp, state = self.process_traffic_lights()
 
@@ -206,13 +194,11 @@ class TLDetector(object):
         if(not self.has_image):
             self.prev_light_loc = None
             return False
-
+            
+        self._image_lock.acquire()
         cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
+        self._image_lock.release()
 
-        #if self.DEBUG_USE_TRUTH:
-        #    # Get ground truth from topic
-        #   return light.state
-        #else:
         #Get classification
         return self.light_classifier.get_classification(cv_image)
             

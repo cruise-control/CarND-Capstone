@@ -73,42 +73,37 @@ class TLClassifier(object):
         
         self.counter += 1
 
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image_np = np.expand_dims(np.asarray(image, dtype=np.uint8), 0)
-
-        (boxes, scores, classes) = self.sess.run([self.detection_boxes, self.detection_scores, self.detection_classes], 
-                                        feed_dict={self.image_tensor: image_np})
-
-        boxes = np.squeeze(boxes)
-        scores = np.squeeze(scores)
-        classes = np.squeeze(classes)
-
-        confidence_cutoff = 0.6
-
-        boxes, scores, classes = self._filter_boxes(confidence_cutoff, boxes, scores, classes)
-
-
-        DEBUG_CLASSIFIER = False
-        if DEBUG_CLASSIFIER:
-            height = image.shape[0]
-            width = image.shape[1]
-            box_coords = self._to_image_coords(boxes, height, width)
-
-            self._draw_boxes(image, box_coords, classes)
-            cv2.imwrite('./light_classification/detection_images/{}.png'.format(str(self.counter).zfill(3)), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-        
         # Hack to reduce processing to every second image
         if self.skip >= 5:
+            
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image_np = np.expand_dims(np.asarray(image, dtype=np.uint8), 0)
+
+            (boxes, scores, classes) = self.sess.run([self.detection_boxes, self.detection_scores, self.detection_classes], 
+                                            feed_dict={self.image_tensor: image_np})
+
+            boxes = np.squeeze(boxes)
+            scores = np.squeeze(scores)
+            classes = np.squeeze(classes)
+
+            confidence_cutoff = 0.6
+
+            boxes, scores, classes = self._filter_boxes(confidence_cutoff, boxes, scores, classes)
+
+            DEBUG_CLASSIFIER = False
+            if DEBUG_CLASSIFIER:
+                height = image.shape[0]
+                width = image.shape[1]
+                box_coords = self._to_image_coords(boxes, height, width)
+
+                self._draw_boxes(image, box_coords, classes)
+                cv2.imwrite('./light_classification/detection_images/{}.png'.format(str(self.counter).zfill(3)), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+            
             self.predictor.processClassifications(classes, scores)
             label = {4:'UNKNOWN',2:'GREEN',1:'YELLOW',0:'RED'}
             rospy.loginfo('@_4 New Prediction: %s %s', self.predictor.now, label[self.predictor.now])
             self.skip = 0
         self.skip += 1
-        
-        DEBUG = False
-        if DEBUG:
-            label = {4:'UNKNOWN',2:'GREEN',1:'YELLOW',0:'RED'}
-            rospy.loginfo('@_4 TL Predicted: %s %s', self.predictor.now, label[self.predictor.now])
         
         return self.predictor.now
         
