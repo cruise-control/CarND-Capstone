@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from threading import Lock
 import rospy
 import cv2
 import os
@@ -72,6 +73,7 @@ class TLClassifier(object):
         self.predictor = TLState()
         self.counter = 0
         self.skip = 0
+        self._classify_lock = Lock()
 
 
     def get_classification(self, image):
@@ -91,11 +93,15 @@ class TLClassifier(object):
         # Hack to reduce processing to every second image
         if self.skip >= 3:
             
+            # Wrap in lock - (assumption that threading causing stuck classification)
+            self._classify_lock.acquire()
+            
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             image_np = np.expand_dims(np.asarray(image, dtype=np.uint8), 0)
-
             (boxes, scores, classes) = self.sess.run([self.detection_boxes, self.detection_scores, self.detection_classes], 
                                             feed_dict={self.image_tensor: image_np})
+                                            
+            self._classify_lock.release()
 
             boxes = np.squeeze(boxes)
             scores = np.squeeze(scores)
