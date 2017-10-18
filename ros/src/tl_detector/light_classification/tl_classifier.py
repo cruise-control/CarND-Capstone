@@ -5,6 +5,7 @@ import rospy
 import cv2
 import os
 from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
 
 from styx_msgs.msg import TrafficLight
 
@@ -74,7 +75,9 @@ class TLClassifier(object):
         self.counter = 0
         self.skip = 0
         self._classify_lock = Lock()
-
+        
+        self._classified_image_publisher = rospy.Publisher('/classified_image', Image, queue_size=1)
+                           
 
     def get_classification(self, image):
         """Determines the color of the traffic light in the image
@@ -111,14 +114,16 @@ class TLClassifier(object):
 
             boxes, scores, classes = self._filter_boxes(confidence_cutoff, boxes, scores, classes)
 
-            DEBUG_CLASSIFIER = False
+            DEBUG_CLASSIFIER = True
             if DEBUG_CLASSIFIER:
                 height = image.shape[0]
                 width = image.shape[1]
                 box_coords = self._to_image_coords(boxes, height, width)
 
                 self._draw_boxes(image, box_coords, classes)
-                cv2.imwrite('./light_classification/detection_images/{}.png'.format(str(self.counter).zfill(3)), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+                # Publish the classified image
+                image_message = self.bridge.cv2_to_imgmsg(image, encoding="rgb8")
+                self._classified_image_publisher.publish(image_message)
             
             self.predictor.processClassifications(classes, scores)
             label = {4:'UNKNOWN',2:'GREEN',1:'YELLOW',0:'RED'}
