@@ -8,7 +8,8 @@ from cv_bridge import CvBridge
 from styx_msgs.msg import TrafficLight
 
 class TLState(object):
-    MAX_GUESS = 3
+    # Number of guess allowed in the case where no lights are classified
+    MAX_GUESS = 2
     
     def __init__(self):
         self.now = TrafficLight.UNKNOWN
@@ -35,7 +36,7 @@ class TLState(object):
             if self.last == TrafficLight.YELLOW or self.last == TrafficLight.RED:
                 self.now = TrafficLight.RED
                 # After N guesses, revert to unknown
-                if self.guess_count > MAX_GUESS: 
+                if self.guess_count > self.MAX_GUESS: 
                     self.now = TrafficLight.UNKNOWN
                 self.guess_count +=1
             else:
