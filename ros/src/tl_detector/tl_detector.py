@@ -181,11 +181,11 @@ class TLDetector(object):
         _, closest_wp = self._waypoint_tree.query((point.x, point.y))
         return closest_wp
 
-    def get_light_state(self):
+    def get_light_state(self,light):
         """Determines the current color of the traffic light
 
         Args:
-            light (TrafficLight): light to classify #DEPRECATED
+            light (TrafficLight): light to classify - used by classifier for pinhole camera model
 
         Returns:
             int: ID of traffic light color (specified in styx_msgs/TrafficLight)
@@ -200,7 +200,7 @@ class TLDetector(object):
         self._image_lock.release()
 
         #Get classification
-        return self.light_classifier.get_classification(cv_image)
+        return self.light_classifier.get_classification(cv_image, light)
             
 
 
@@ -254,7 +254,7 @@ class TLDetector(object):
         # rospy.loginfo('car wp: %s  light_wp: %s  light_index: %s  state: %s', car_wp, light_wp, closest_light, self.get_light_state())
 
         if light:
-            state = self.get_light_state()
+            state = self.get_light_state(light)
             return light_wp, state
         #self.waypoints = None
         return -1, TrafficLight.UNKNOWN
