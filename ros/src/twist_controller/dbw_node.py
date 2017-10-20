@@ -125,7 +125,7 @@ class DBWNode(object):
 
             brake_error = 0
             velocity_error = (self.target_twist.linear.x - self.current_velocity.linear.x)
-            #brake_deadband = 0.2
+            brake_deadband = 0.2
 
             # Normalise the brake error as a fraction of 25 mph
             # meaning that 25 mph overspeed is maximum this will assume the system will achieve
