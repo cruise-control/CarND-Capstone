@@ -70,6 +70,7 @@ private:
   bool pose_set_;
   bool velocity_set_;
   int num_of_next_waypoint_;
+  int num_of_curr_waypoint_;
   geometry_msgs::Point position_of_next_target_;
   double lookahead_distance_;
 
@@ -104,6 +105,7 @@ public:
     , pose_set_(false)
     , velocity_set_(false)
     , num_of_next_waypoint_(-1)
+    , num_of_curr_waypoint_(-1)
     , lookahead_distance_(0)
   {
   }

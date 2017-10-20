@@ -43,7 +43,7 @@ Steps:
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
 SPEED_LIMIT= 15
-MAX_DECEL = 1.0
+MAX_DECEL = 3.0
 
 # FIXME! Magic number alert!
 # FIXME - These belong in the world model
@@ -272,7 +272,7 @@ class WaypointUpdater(object):
         rospy.Subscriber('/current_velocity', TwistStamped, self._current_velocity_cb)
         #rospy.Subscriber('/obstacle_waypoint', Int32, self._obstacle_cb)
 
-        self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
+        self.final_waypoints_pub = rospy.Publisher('/final_waypoints', Lane, queue_size=1)
         self.control_mode_pub = rospy.Publisher('/control_mode', Int32, queue_size=1)
 
         # Road data
@@ -290,6 +290,9 @@ class WaypointUpdater(object):
         self.hold_pos = None
         self.hold_state = None
         self.hold_time = None
+
+        # approach boolean
+        self.approach_flag = True
 
         # FSM
         self._states = {self.START: self.st_start,
@@ -316,7 +319,7 @@ class WaypointUpdater(object):
 
     def _current_velocity_cb(self, msg):
         self._current_vel_lock.acquire()
-        self._current_vel = msg
+        self._current_vel = msg  # is a TwistStamped
         self._current_vel_lock.release()
 
 
@@ -326,6 +329,7 @@ class WaypointUpdater(object):
 
 
     def vel(self):
+        current_vel = 0  # presume stopped if no info
         self._current_vel_lock.acquire()
         current_vel = self._current_vel
         self._current_vel_lock.release()
@@ -448,6 +452,7 @@ class WaypointUpdater(object):
                 self.hold_time = light[3]
         else:
             rospy.loginfo('no light!!!')
+            self.hold_pos = None
             # Note: The below logic is inherently unsafe for real-world driving as upon
             # having X seconds of invalid traffic light observations, it will result in
             # the vehicle transitioning into CRUISE mode. This is ok for the scope of this
@@ -469,8 +474,8 @@ class WaypointUpdater(object):
                     self.hold_pos = None
                     self.hold_state = None
                     self.hold_time = None
-                    
-                
+
+
 
         # Set the path we must follow, i.e. spline the road
         # This currently doesn't take into account any obstacles, because we
@@ -478,14 +483,19 @@ class WaypointUpdater(object):
         # Velocity profile is updated in the robot state functions, i.e. the
         # planner tells the vehicle where to go, the state function decides
         # how to do it.
-        self.getSplinePath(pose, heading)
+        #self.getSplinePath(pose, heading)
 
         # Choose the correct state plan execute function
         if self.hold_pos is None:
+            rospy.loginfo('Set Cruise1')
             self._state = self.CRUISE
+            # this resets the velocity profile, only replan when cruising
+            self.getSplinePath(pose, heading)
+            self.approach_flag = True
         else:
             hold_s, _ = self.world.cartesian_to_frenet(self.hold_pos[0], self.hold_pos[1], heading)
             dtg = hold_s - my_s;
+            rospy.loginfo('Hold Ahead %f', dtg)
 
             # TODO - Use time to intercept to tell if we should blow through a red light
             #        Would have to get light state from world method, and more importantly,
@@ -505,12 +515,15 @@ class WaypointUpdater(object):
                     rospy.loginfo('Late Yellow!!!')
 
             if dtg < -PAST_TOL or time_to_intercept < time_to_red:
+                rospy.loginfo('Set Cruise2')
                 self._state = self.CRUISE
             elif dtg > HOLD_TOL or time_to_intercept == time_to_red:
+                rospy.loginfo('Set Approach')
                 self._state = self.APPROACH
             else:
+                rospy.loginfo('Set Hold')
                 self._state = self.HOLD
-            
+
         # Update the prior state
         self.last_hold_state = self.hold_state
 
@@ -522,6 +535,7 @@ class WaypointUpdater(object):
 
 
     def st_cruise(self):
+        rospy.loginfo('Cruising...')
         self.control_mode_pub.publish(Int32(self.CONTROL_GO))
 
         # Set velocity profile
@@ -536,10 +550,16 @@ class WaypointUpdater(object):
 
 
     def st_approach(self):
+        rospy.loginfo('Approaching...')
         self.control_mode_pub.publish(Int32(self.CONTROL_GO))
 
-        # Set velocity profile
-        self.set_decelerate_profile(self.hold_pos)
+        if self.approach_flag:  # don't keep recalculating profile on approach
+            # Set velocity profile
+            self.set_decelerate_profile(self.hold_pos)
+            self.approach_flag = False
+
+        #for i in range(len(self.generated_waypoints)):
+            #rospy.loginfo('Approach %d  %f', i, self.get_waypoint_velocity(self.generated_waypoints[i]))
 
         # Create a new lane message type and publish it
         l = Lane()
@@ -550,6 +570,7 @@ class WaypointUpdater(object):
 
 
     def st_hold(self):
+        rospy.loginfo('Holding...')
         self.control_mode_pub.publish(Int32(self.CONTROL_STOP))
 
 
@@ -609,26 +630,40 @@ class WaypointUpdater(object):
                 closest_wp = i
                 closest_dist = dist
 
+        # 0 is where we are now, use current_velocity from TwistStamped vel()
+        # Get vehicle velocity
+        my_vel = self.vel().twist.linear.x
+        rospy.loginfo('CurrentVel() %f', my_vel)
+        self.set_waypoint_velocity(self.generated_waypoints, 0, my_vel)
+
         # What if the last generated point is closest but it is still far from
         # the light?
         if closest_wp < len(self.generated_waypoints):
+            # find distance this entire profile covers to scale the profile based on current velocity
+            profile_dist = World.distance(self.generated_waypoints[0].pose.pose.position.x,
+                                          self.generated_waypoints[0].pose.pose.position.y,
+                                          self.generated_waypoints[closest_wp].pose.pose.position.x,
+                                          self.generated_waypoints[closest_wp].pose.pose.position.y)
+            rospy.loginfo('Profile_Dist %f', profile_dist)
 
             # then, come to a stop at the end waypoint/stop line
-            for i in range(0, closest_wp):  # since the first waypoint is where we are now
+            for i in range(1, closest_wp):  # 1 since the first waypoint is where we are now
                 dist = World.distance(self.generated_waypoints[i].pose.pose.position.x,
                                       self.generated_waypoints[i].pose.pose.position.y,
                                       self.generated_waypoints[closest_wp].pose.pose.position.x,
                                       self.generated_waypoints[closest_wp].pose.pose.position.y)
 
                 # Assume applying max decel to the stop point, this would be the velocity at that point
-                vel = math.sqrt(2*MAX_DECEL * dist)
-                vel = min(vel, SPEED_LIMIT)
+                profile = math.sqrt(MAX_DECEL * dist)
+                vel = min(my_vel*(profile/math.sqrt(MAX_DECEL*profile_dist)), SPEED_LIMIT)
                 if vel < 1.:
                     vel = 0.
                 self.set_waypoint_velocity(self.generated_waypoints, i, vel)
+                rospy.loginfo('Point %d  Distance %f  Deceleration %f', i, dist, vel)
 
-            # i is now closest waypoint, always set to 0.0 velocity
-            self.set_waypoint_velocity(self.generated_waypoints, i, 0)
+            # i is now closest waypoint, always set following to 0.0 velocity
+            for i in range(closest_wp, len(self.generated_waypoints)):
+                self.set_waypoint_velocity(self.generated_waypoints, i, 0)
 
 
     def get_waypoint_velocity(self, waypoint):

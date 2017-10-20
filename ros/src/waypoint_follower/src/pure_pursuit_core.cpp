@@ -63,7 +63,7 @@ double PurePursuit::getCmdVelocity(int waypoint) const
   }
 
   double velocity = current_waypoints_.getWaypointVelocityMPS(waypoint);
-  // ROS_INFO_STREAM("waypoint : " << mps2kmph(velocity) << " km/h ( " << velocity << "m/s )");
+  ROS_INFO_STREAM("waypoint : " << waypoint << " has " << mps2kmph(velocity) << " km/h ( " << velocity << "m/s )");
   return velocity;
 }
 
@@ -240,12 +240,12 @@ bool PurePursuit::verifyFollowing() const
   //ROS_ERROR("side diff : %lf , angle diff : %lf",displacement,relative_angle);
   if (displacement < displacement_threshold_ && relative_angle < relative_angle_threshold_)
   {
-    // ROS_INFO("Following : True");
+    ROS_INFO("Following : True");
     return true;
   }
   else
   {
-    // ROS_INFO("Following : False");
+    ROS_INFO("Following : False");
     return false;
   }
 }
@@ -259,7 +259,7 @@ geometry_msgs::Twist PurePursuit::calcTwist(double curvature, double cmd_velocit
   twist.linear.x = cmd_velocity;
   if (!following_flag)
   {
-    //ROS_ERROR_STREAM("Not following");
+    ROS_ERROR_STREAM("Not following");
     twist.angular.z = current_velocity_.twist.linear.x * curvature;
   }
   else
@@ -293,9 +293,16 @@ void PurePursuit::getNextWaypoint()
       return;
     }
 
+    double distance = getPlaneDistance(current_waypoints_.getWaypointPosition(i), current_pose_.pose.position);
+    //double velocity = current_waypoints_.getWaypointVelocityMPS(i);
+	//ROS_INFO_STREAM("wp = " << i << " dist = " << getPlaneDistance(current_waypoints_.getWaypointPosition(i), current_pose_.pose.position) << "  path_size = " << path_size);
+    //ROS_INFO("lookahead distance: %f   velocity: %f ",lookahead_distance_, velocity);
+    //ROS_INFO("Current Pose: %f, %f ", current_pose_.pose.position.x, current_pose_.pose.position.y);
+    //ROS_INFO_STREAM("ISfront = " << current_waypoints_.isFront(i, current_pose_.pose));
     // if there exists an effective waypoint
-    if (getPlaneDistance(current_waypoints_.getWaypointPosition(i), current_pose_.pose.position) > lookahead_distance_)
+    if (distance > lookahead_distance_ && current_waypoints_.isFront(i, current_pose_.pose))
     {
+      ROS_INFO("NEXT wp = %d ", i);
       num_of_next_waypoint_ = i;
       //ROS_ERROR_STREAM("wp = " << i << " dist = " << getPlaneDistance(current_waypoints_.getWaypointPosition(i), current_pose_.pose.position) );
       return;
@@ -303,6 +310,7 @@ void PurePursuit::getNextWaypoint()
   }
 
   // if this program reaches here , it means we lost the waypoint!
+  ROS_ERROR("Waypoint Lost!");
   num_of_next_waypoint_ = -1;
   return;
 }
@@ -337,6 +345,7 @@ geometry_msgs::TwistStamped PurePursuit::outputTwist(geometry_msgs::Twist t) con
 
   double a = v * omega;
   ROS_INFO("lateral accel = %lf", a);
+  ROS_INFO("velocity = %lf", v);
 
   twist.twist.linear.x = fabs(a) > g_lateral_accel_limit ? max_v
                     : v;
@@ -370,14 +379,16 @@ geometry_msgs::TwistStamped PurePursuit::go()
     ROS_WARN("lost next waypoint");
     return outputZero();
   }
-  //ROS_ERROR_STREAM("next waypoint = " <<  num_of_next_waypoint_);
+  ROS_ERROR_STREAM("next waypoint = " <<  num_of_next_waypoint_);
+  num_of_curr_waypoint_ = getClosestWaypoint(current_waypoints_.getCurrentWaypoints(), current_pose_.pose);
+  ROS_ERROR_STREAM("curr waypoint = " <<  num_of_curr_waypoint_);
 
   // if g_linear_interpolate_mode is false or next waypoint is first or last
   if (!linear_interpolate_ || num_of_next_waypoint_ == 0 ||
       num_of_next_waypoint_ == (static_cast<int>(current_waypoints_.getSize() - 1)))
   {
     position_of_next_target_ = current_waypoints_.getWaypointPosition(num_of_next_waypoint_);
-    return outputTwist(calcTwist(calcCurvature(position_of_next_target_), getCmdVelocity(0)));
+    return outputTwist(calcTwist(calcCurvature(position_of_next_target_), getCmdVelocity(num_of_curr_waypoint_)));
   }
 
   // linear interpolation and calculate angular velocity
@@ -391,7 +402,7 @@ geometry_msgs::TwistStamped PurePursuit::go()
 
   // ROS_INFO("next_target : ( %lf , %lf , %lf)", next_target.x, next_target.y,next_target.z);
 
-  return outputTwist(calcTwist(calcCurvature(position_of_next_target_), getCmdVelocity(0)));
+  return outputTwist(calcTwist(calcCurvature(position_of_next_target_), getCmdVelocity(num_of_curr_waypoint_)));
 
 // ROS_INFO("linear : %lf, angular : %lf",twist.twist.linear.x,twist.twist.angular.z);
 
