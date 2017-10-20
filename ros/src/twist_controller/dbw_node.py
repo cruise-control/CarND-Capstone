@@ -69,6 +69,8 @@ class DBWNode(object):
 
         self._controller = Controller(wheel_base,steer_ratio,0.0,max_lat_accel,max_steer_angle)
 
+        self._brake_deadband = brake_deadband
+
         self._mode_lock = Lock()
 
         # Subscribe to all topics
@@ -125,11 +127,10 @@ class DBWNode(object):
 
             brake_error = 0
             velocity_error = (self.target_twist.linear.x - self.current_velocity.linear.x)
-            brake_deadband = 0.2
 
             # Normalise the brake error as a fraction of 25 mph
             # meaning that 25 mph overspeed is maximum this will assume the system will achieve
-            if velocity_error < -brake_deadband:
+            if velocity_error < -self._brake_deadband:  # let it coast a little
                 brake_error = -velocity_error   # work in positives
                 self._controller.reset_speed()  # get rid of throttle I
 
@@ -188,10 +189,11 @@ class DBWNode(object):
             self.prev_brake = brake
             bcmd = BrakeCmd()
             bcmd.enable = True
-            bcmd.pedal_cmd_type = BrakeCmd.CMD_TORQUE
             #bcmd.pedal_cmd_type = BrakeCmd.CMD_PERCENT
-            bcmd.pedal_cmd = brake * BrakeCmd.TORQUE_MAX  # CMD_PERCENT seems to be ineffective
             #bcmd.pedal_cmd = brake
+            # scale by maximum torque with brake 0-1 to mimic CMD_PERCENT
+            bcmd.pedal_cmd = brake * BrakeCmd.TORQUE_MAX
+            bcmd.pedal_cmd_type = BrakeCmd.CMD_TORQUE  # CMD_PERCENT seems to be ineffective
             self.brake_pub.publish(bcmd)
 
         # The simulator latches the commands, so we always need to check
