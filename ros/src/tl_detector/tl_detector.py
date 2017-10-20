@@ -31,9 +31,15 @@ class TLDetector(object):
         self.camera_image = None
         self.lights = []
         self._waypoint_tree = None
-        self.DEBUG_USE_TRUTH = True
         self._image_lock = Lock()
-        
+
+        use_truth = int(rospy.get_param('~use_truth', '0'))
+        if use_truth != 0:
+            self.DEBUG_USE_TRUTH = True
+            rospy.loginfo('Using truth data for light state')
+        else:
+            self.DEBUG_USE_TRUTH = False 
+
         # Base waypoints should only be published once
         # For now it's best to assume this because we don't take any special
         # care to re-initialize properly if we were to get a different set
@@ -69,7 +75,6 @@ class TLDetector(object):
         self.config = yaml.load(config_string)
 
         self.upcoming_red_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
-        self.bbox_image_pub = rospy.Publisher('/detector_image', Image, queue_size=1)
 
 
         self.bridge = CvBridge()
@@ -79,12 +84,6 @@ class TLDetector(object):
         self.last_state = TrafficLight.UNKNOWN
         self.last_wp = -1
         self.state_count = 0
-
-        """
-        # shouldn't change during drive
-        self.lights_pos_x = []
-        self.lights_pos_y = []
-        """
 
         # simulator only (not fed in real car)
         self.states = []
@@ -106,19 +105,17 @@ class TLDetector(object):
         """
         self.lights = msg.lights  # store for later
 
-
-    def image_cb_test(self, msg):
-        '''DEPRECATED'''
-        self.camera_image = msg
-        cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
-        if self.light_classifier:
-            detector_image = self.light_classifier.get_classification(cv_image)
-        #self.bbox_image_pub.publish(detector_image)
+        # constantly updating light colors - TODO: use until we get camera classifier working
+        self.states = []
+        for l in self.lights:
+            self.states.append(l.state)  # uint8 of RED(0), YELLOW(1), GREEN(2), UNKNOWN(4)
 
 
     def image_cb(self, msg):
-        """Identifies red lights in the incoming camera image and publishes the index
-            of the waypoint closest to the red light's stop line to /traffic_waypoint
+        """Publish upcoming red lights for each image
+
+        Identifies red lights in the incoming camera image and publishes the index
+        of the waypoint closest to the red light's stop line to /traffic_waypoint
 
         Args:
             msg (Image): image from car-mounted camera
@@ -132,28 +129,6 @@ class TLDetector(object):
         self._image_lock.release()
 
         light_wp, state = self.process_traffic_lights()
-
-        '''
-        Publish upcoming red lights at camera frequency.
-        Each predicted state has to occur `STATE_COUNT_THRESHOLD` number
-        of times till we start using it. Otherwise the previous stable state is
-        used.
-        '''
-
-        # FIXME -- temporarily disabling the THRESHOLD LOGIC, Uncomment later
-        # As long as we are using truth data, assume it is perfect and no need
-        # to count.  Too late to think about getting everything right! :)
-#        if self.state != state:
-#            self.state_count = 0
-#            self.state = state
-#        elif (self.state_count >= STATE_COUNT_THRESHOLD) and (light_wp < 100000):  # sometimes there's no light to publish (inf)
-#            self.last_state = self.state
-#            #light_wp = light_wp if state == TrafficLight.RED else -1  # TODO: put this back when we Classify
-#            self.last_wp = light_wp
-#            self.upcoming_red_light_pub.publish(Int32(light_wp))
-#        else:
-#            self.upcoming_red_light_pub.publish(Int32(self.last_wp))
-#        self.state_count += 1
         if light_wp >= 0:
             if state == TrafficLight.RED:
                 self.upcoming_red_light_pub.publish(Int32(light_wp))
@@ -181,7 +156,7 @@ class TLDetector(object):
         _, closest_wp = self._waypoint_tree.query((point.x, point.y))
         return closest_wp
 
-    def get_light_state(self,light):
+    def get_light_state(self, light):
         """Determines the current color of the traffic light
 
         Args:
@@ -194,13 +169,16 @@ class TLDetector(object):
         if(not self.has_image):
             self.prev_light_loc = None
             return False
-            
+
         self._image_lock.acquire()
         cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
         self._image_lock.release()
 
         #Get classification
-        return self.light_classifier.get_classification(cv_image, light)
+        if self.DEBUG_USE_TRUTH:
+            return light.state
+        else:
+            return self.light_classifier.get_classification(cv_image, light)
             
 
 
