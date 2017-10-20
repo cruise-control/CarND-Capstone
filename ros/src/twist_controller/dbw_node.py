@@ -157,7 +157,7 @@ class DBWNode(object):
             # Scale b up by maximum torque as listed in the brake command message
             #b *= BrakeCmd.TORQUE_MAX
 
-            rospy.loginfo('@_1 PID OUT: THR %s BRK %s YAW %s', str(t), str(b), str(s))
+            #rospy.loginfo('@_1 PID OUT: THR %s BRK %s YAW %s', str(t), str(b), str(s))
 
             # If the human driver is not driving then publish commands
             if self.dbw_enabled:
