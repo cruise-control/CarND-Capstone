@@ -524,9 +524,6 @@ class WaypointUpdater(object):
                 rospy.loginfo('Set Hold')
                 self._state = self.HOLD
 
-        # Update the prior state
-        self.last_hold_state = self.hold_state
-
 
     def st_start(self):
         # This is just a stub so that the vehicle will do nothing if
