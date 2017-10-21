@@ -584,27 +584,6 @@ class WaypointUpdater(object):
             self._states[self._state]()
 
 
-    def set_velocity_profile(self):
-        '''Set the velocity profile for the planned path
-        '''
-        # Get pose data
-        pose = self.pose_hist()
-        pose = pose[0]
-        quaternion = (
-            pose.orientation.x,
-            pose.orientation.y,
-            pose.orientation.z,
-            pose.orientation.w)
-        heading = Utility.getHeading(quaternion)
-
-        # Decelerate to a point if necessary
-        if self.hold_pos is not None:
-            rospy.loginfo('Traffic light coming up @ (%f, %f)', self.hold_pos[0], self.hold_pos[1])
-            self.set_decelerate_profile(self.hold_pos)
-        else:
-            self.set_constant_velocity_profile(SPEED_LIMIT)
-
-
     def set_constant_velocity_profile(self, vel):
         for i in range(len(self.generated_waypoints)):
             self.set_waypoint_velocity(self.generated_waypoints, i, vel)
