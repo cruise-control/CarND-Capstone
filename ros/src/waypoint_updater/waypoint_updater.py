@@ -291,9 +291,6 @@ class WaypointUpdater(object):
         self.hold_state = None
         self.hold_time = None
 
-        # approach boolean
-        self.approach_flag = True
-
         # FSM
         self._states = {self.START: self.st_start,
                         self.CRUISE: self.st_cruise,
@@ -483,15 +480,12 @@ class WaypointUpdater(object):
         # Velocity profile is updated in the robot state functions, i.e. the
         # planner tells the vehicle where to go, the state function decides
         # how to do it.
-        #self.getSplinePath(pose, heading)
+        self.getSplinePath(pose, heading)
 
         # Choose the correct state plan execute function
         if self.hold_pos is None:
             rospy.loginfo('Set Cruise1')
             self._state = self.CRUISE
-            # this resets the velocity profile, only replan when cruising
-            self.getSplinePath(pose, heading)
-            self.approach_flag = True
         else:
             hold_s, _ = self.world.cartesian_to_frenet(self.hold_pos[0], self.hold_pos[1], heading)
             dtg = hold_s - my_s;
@@ -550,13 +544,8 @@ class WaypointUpdater(object):
         rospy.loginfo('Approaching...')
         self.control_mode_pub.publish(Int32(self.CONTROL_GO))
 
-        if self.approach_flag:  # don't keep recalculating profile on approach
-            # Set velocity profile
-            self.set_decelerate_profile(self.hold_pos)
-            self.approach_flag = False
-
-        #for i in range(len(self.generated_waypoints)):
-            #rospy.loginfo('Approach %d  %f', i, self.get_waypoint_velocity(self.generated_waypoints[i]))
+        # Set velocity profile
+        self.set_decelerate_profile(self.hold_pos)
 
         # Create a new lane message type and publish it
         l = Lane()
