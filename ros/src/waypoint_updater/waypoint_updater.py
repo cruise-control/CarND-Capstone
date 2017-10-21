@@ -41,7 +41,7 @@ Steps:
 3 Publish this next trajectory set. (after the vehicle pose comes in)
 '''
 
-PLAN_INTERVAL = 1 # 1 Second per path plan step
+PLAN_INTERVAL = 2 # Seconds per path plan step
 SPEED_LIMIT= 15
 MAX_DECEL = 1.5
 
@@ -57,7 +57,7 @@ YELLOW = 1
 GREEN = 0
 
 # FIXME! More magic numbers!
-HOLD_TOL = 4 # Command hold this far before (meters)
+HOLD_TOL = 3 # Command hold this far before (meters)
 PAST_TOL = 3 # Tolate going past by this much (meters), FIXME does this make sense?
 LYEL_TOL = HOLD_TOL/1.3 # If red transitions and in this margin, will be a late yellow (tunable parameter)
 
@@ -280,10 +280,24 @@ class WaypointUpdater(object):
 
         # Ego data
         self.POSE_HIST_SZ = 2 # Save last 2 poses received
+
+        # Pose history requires a lock because it us updated by the subscriber
+        # callback
         self._pose_lock = Lock()
         self._pose_hist = []
+
+        # Current velocity requires a lock because it is updated by the
+        # subscriber callback
         self._current_vel_lock = Lock()
         self._current_vel = None
+
+        # These are only referenced synchronously and are thus threadsafe
+        # (no lock)
+        self.pose = None
+        self.heading = None
+        self.s = None
+        self.d = None
+        self.speed = None
 
         # Plan data
         self.generated_waypoints = []
@@ -387,7 +401,6 @@ class WaypointUpdater(object):
         pts = []
 
         sp = np.arange(0, tkc.s[-1], 1)
-        rospy.loginfo('N sp %d', len(sp))
         index = 0
         for i in sp:
             # Fit spline point
@@ -412,33 +425,56 @@ class WaypointUpdater(object):
         self.generated_waypoints = pts
 
 
-    def loop(self):
+    def update_state(self):
 
-        LOOP_RATE = 1/PLAN_INTERVAL
-        rate = rospy.Rate(LOOP_RATE) # N Hz
-        while not rospy.is_shutdown():
-            self.step()
-            rate.sleep()
-
-
-    def plan(self):
-        '''Plan the next vehicle actions
-        '''
-        # Get last 2 ego poses
+        # Get last ego pose
         poses = self.pose_hist()
-        pose = poses[0]
+        self.pose = poses[0]
         quaternion = (
-            pose.orientation.x,
-            pose.orientation.y,
-            pose.orientation.z,
-            pose.orientation.w)
-        heading = Utility.getHeading(quaternion)
-        my_s, _ = self.world.cartesian_to_frenet(pose.position.x, pose.position.y, heading)
+            self.pose.orientation.x,
+            self.pose.orientation.y,
+            self.pose.orientation.z,
+            self.pose.orientation.w)
+        self.heading = Utility.getHeading(quaternion)
+        self.s, self.d = self.world.cartesian_to_frenet(self.pose.position.x, self.pose.position.y, self.heading)
 
         # Get vehicle velocity
         my_vel = self.vel()
-        my_speed = math.sqrt(my_vel.twist.linear.x**2 + my_vel.twist.linear.y**2)
+        self.speed = math.sqrt(my_vel.twist.linear.x**2 + my_vel.twist.linear.y**2)
 
+
+    def loop(self):
+
+        LOOP_RATE = 2 # Hz
+
+        # We only run the spline planner ever PLAN_INTERVAL seconds,
+        # which necessitates this logic
+        loop_ctr = 0
+        plan_cnt = int(LOOP_RATE*PLAN_INTERVAL)
+
+        # Main node loop
+        rate = rospy.Rate(LOOP_RATE) # N Hz
+        while not rospy.is_shutdown():
+            # Determine if we need to run the spline planner
+            if loop_ctr == 0:
+                plan = True
+            else:
+                plan = False
+
+            # Run the node logic
+            self.step(plan)
+
+            # Increment loop counter
+            loop_ctr += 1
+            loop_ctr %= plan_cnt
+
+            # Wait till next loop
+            rate.sleep()
+
+    
+    def sense(self):
+        '''Update world state
+        '''
         # Look for upcoming traffic lights
         # In the real world this would be a more generalized world
         # model/obstacle map update
@@ -446,21 +482,20 @@ class WaypointUpdater(object):
         #        far enough that we will have time to stop
         LOOKAHEAD_DIST = 100 # meters
 
-        s_back = my_s-PAST_TOL
+        s_back = self.s-PAST_TOL
         orig_x, orig_y = self.world.frenet_to_cartesian(s_back, 0)
-        light = self.world.traffic_lights_in_range(orig_x, orig_y, heading, LOOKAHEAD_DIST)
+        light = self.world.traffic_lights_in_range(orig_x, orig_y, self.heading, LOOKAHEAD_DIST)
         if light is not None:
             # Find a point some margin behind the stop position to target
             hold_x = light[0]
             hold_y = light[1]
-            stop_s, _ = self.world.cartesian_to_frenet(hold_x, hold_y, heading)
+            stop_s, _ = self.world.cartesian_to_frenet(hold_x, hold_y, self.heading)
             self.hold_pos = self.world.frenet_to_cartesian(stop_s-HOLD_TOL/2, _)
             self.hold_state = light[2]
             # Save time of arrival of the message, but only when light changes
             if self.hold_time is None:
                 self.hold_time = light[3]
         else:
-            rospy.loginfo('no light!!!')
             self.hold_pos = None
             # Note: The below logic is inherently unsafe for real-world driving as upon
             # having X seconds of invalid traffic light observations, it will result in
@@ -486,34 +521,35 @@ class WaypointUpdater(object):
 
 
 
+
+    def plan(self):
+        '''Plan the next vehicle actions
+        '''
         # Set the path we must follow, i.e. spline the road
         # This currently doesn't take into account any obstacles, because we
         # are not taking any evasive action other than to slow and/or stop
         # Velocity profile is updated in the robot state functions, i.e. the
         # planner tells the vehicle where to go, the state function decides
         # how to do it.
-        self.getSplinePath(pose, heading)
+        self.getSplinePath(self.pose, self.heading)
 
+
+    def act(self):
         # Choose the correct state plan execute function
         if self.hold_pos is None:
-            rospy.loginfo('Set Cruise1')
             self._state = self.CRUISE
         else:
-            hold_s, _ = self.world.cartesian_to_frenet(self.hold_pos[0], self.hold_pos[1], heading)
-            dtg = hold_s - my_s;
-            rospy.loginfo('Hold Ahead %f', dtg)
+            hold_s, _ = self.world.cartesian_to_frenet(self.hold_pos[0], self.hold_pos[1], self.heading)
+            dtg = hold_s - self.s;
 
-            # TODO - Use time to intercept to tell if we should blow through a red light
-            #        Would have to get light state from world method, and more importantly,
-            #        would need to know when it turned yellow!
-            time_to_intercept = dtg/my_speed
+            time_to_intercept = dtg/self.speed
             if self.hold_state == RED:
                 time_to_red = -float('inf')
             else:
                 yellow_time_elapsed = rospy.Time.now()-self.hold_time
                 time_to_red = YELLOW_LIGHT_TIME - yellow_time_elapsed.to_sec()
                 # Where will the vehicle be at the red light transition?
-                pos_at_red_transition = my_s + my_speed * time_to_red
+                pos_at_red_transition = self.s + self.speed * time_to_red
                 # Will that result in a late yellow?
                 if pos_at_red_transition >= hold_s - LYEL_TOL:
                     # Yes, then set time to red as the time to intercept
@@ -521,14 +557,14 @@ class WaypointUpdater(object):
                     rospy.loginfo('Late Yellow!!!')
 
             if dtg < -PAST_TOL or time_to_intercept < time_to_red:
-                rospy.loginfo('Set Cruise2')
                 self._state = self.CRUISE
             elif dtg > HOLD_TOL or time_to_intercept == time_to_red:
-                rospy.loginfo('Set Approach')
                 self._state = self.APPROACH
             else:
-                rospy.loginfo('Set Hold')
                 self._state = self.HOLD
+
+        # Call current state function
+        self._states[self._state]()
 
 
     def st_start(self):
@@ -538,7 +574,6 @@ class WaypointUpdater(object):
 
 
     def st_cruise(self):
-        rospy.loginfo('Cruising...')
         self.control_mode_pub.publish(Int32(self.CONTROL_GO))
 
         # Set velocity profile
@@ -553,7 +588,6 @@ class WaypointUpdater(object):
 
 
     def st_approach(self):
-        rospy.loginfo('Approaching...')
         self.control_mode_pub.publish(Int32(self.CONTROL_GO))
 
         # Set velocity profile
@@ -568,7 +602,6 @@ class WaypointUpdater(object):
 
 
     def st_hold(self):
-        rospy.loginfo('Holding...')
         self.control_mode_pub.publish(Int32(self.CONTROL_STOP))
 
 
@@ -581,17 +614,16 @@ class WaypointUpdater(object):
                 wp.pose.pose.position.y,
                 wp.twist.twist.linear.x)
 
-    def step(self):
+    def step(self, do_plan=True):
         '''Main vehicle function
         '''
         if len(self._pose_hist)>=self.POSE_HIST_SZ:
 
-            # Call the planner
-            # This will set the current state exec function
-            self.plan()
-
-            # Call current state function
-            self._states[self._state]()
+            self.update_state()
+            self.sense()
+            if do_plan:
+                self.plan()
+            self.act()
 
 
     def set_constant_velocity_profile(self, vel):
