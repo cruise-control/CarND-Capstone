@@ -41,9 +41,9 @@ Steps:
 3 Publish this next trajectory set. (after the vehicle pose comes in)
 '''
 
-LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
+PLAN_INTERVAL = 1 # 1 Second per path plan step
 SPEED_LIMIT= 15
-MAX_DECEL = 1.0
+MAX_DECEL = 1.5
 
 # FIXME! Magic number alert!
 # FIXME - These belong in the world model
@@ -349,24 +349,33 @@ class WaypointUpdater(object):
         return poses
 
 
-    def getSplinePath(self, pose, heading, velocity=None):
-
-        # TODO pass in velocity
-
-        start = time.time()
+    def getSplinePath(self, pose, heading, speed=0.0):
 
         # Get frenet coordinates
         s, d = self.world.cartesian_to_frenet(pose.position.x, pose.position.y, heading)
 
+        # Spline control point parameters
+        # We know that the waypoint_follower node attempts to track a point 2
+        # seconds out and to account for the interval in our plan step, we
+        # plan at least 2+PLAN_INTERVAL seconds out
+        ctrl_spline_length = (2+PLAN_INTERVAL) * max(speed, SPEED_LIMIT)
+        ctrl_pt_spacing = 5 # meter spacing between control points
+        n_ctrl_pts = int(math.ceil(ctrl_spline_length / ctrl_pt_spacing))
+
         # Setup the Coordinates to get the spline between
-        # Append 20 points at increments of (15 + [0:19]*5) m
-        # FIXME: This is close to the first cut logic by S.C. but switched to
-        # increment in meters rather than waypoint index.  Instead, should use
-        # lookahead time to make sure we don't plan beyond the end of the spline
-        px = [pose.position.x]
-        py = [pose.position.y]
-        for i in range(20):
-            plan_s = s + 15 + i*5
+        # Append n_ctrl_points at increments of ctrl_pt_spacing
+        # We no longer use the current position as a control point because 
+        # the waypoint follower always targets a point ahead in the trajectory.
+        # By keeping the first point ahead, we are further attempting to ensure
+        # that if we get off track, we won't overcompensate back when because
+        # the follower is using a point at our s (frenet) to calculate 
+        # curvature, though this isn't guaranteed to work all the time.
+        # TODO: It would be better to abstract this away here and compensate
+        #       in the waypoint follower node
+        px = []
+        py = []
+        for i in range(n_ctrl_pts):
+            plan_s = s + speed*0.5 + i*ctrl_pt_spacing
             plan_d = 0
             plan_x, plan_y = self.world.frenet_to_cartesian(plan_s, plan_d)
             px.append(plan_x)
@@ -377,13 +386,15 @@ class WaypointUpdater(object):
 
         pts = []
 
-        s = np.arange(0, tkc.s[-1], 1)
+        sp = np.arange(0, tkc.s[-1], 1)
+        rospy.loginfo('N sp %d', len(sp))
         index = 0
-        for i in s:
+        for i in sp:
+            # Fit spline point
             ix, iy = Utility.fitX(i, tkc)
-            wp = Waypoint()
-            # Put in the orientation of the waypoint
 
+            # Generate waypoint
+            wp = Waypoint()
             wp.pose.pose.orientation = Quaternion(*Utility.getQuaternion(0,0,tkc.calc_yaw(i)))
             wp.pose.pose.position.x = ix
             wp.pose.pose.position.y = iy
@@ -396,14 +407,15 @@ class WaypointUpdater(object):
             pts.append(wp)
             self.set_waypoint_velocity(pts,index,0)
             index += 1
-            if index > range(LOOKAHEAD_WPS):
-                break
 
+        # Save generated points
         self.generated_waypoints = pts
 
 
     def loop(self):
-        rate = rospy.Rate(1) # N Hz
+
+        LOOP_RATE = 1/PLAN_INTERVAL
+        rate = rospy.Rate(LOOP_RATE) # N Hz
         while not rospy.is_shutdown():
             self.step()
             rate.sleep()
@@ -559,6 +571,15 @@ class WaypointUpdater(object):
         rospy.loginfo('Holding...')
         self.control_mode_pub.publish(Int32(self.CONTROL_STOP))
 
+
+    def _print_waypoints(self):
+        for i in range(len(self.generated_waypoints)):
+            wp = self.generated_waypoints[i]
+            rospy.loginfo('%d: %f, %f, %f',
+                i,
+                wp.pose.pose.position.x,
+                wp.pose.pose.position.y,
+                wp.twist.twist.linear.x)
 
     def step(self):
         '''Main vehicle function
