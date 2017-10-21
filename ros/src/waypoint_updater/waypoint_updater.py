@@ -43,7 +43,7 @@ Steps:
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
 SPEED_LIMIT= 15
-MAX_DECEL = 3.0
+MAX_DECEL = 1.0
 
 # FIXME! Magic number alert!
 # FIXME - These belong in the world model
@@ -57,8 +57,8 @@ YELLOW = 1
 GREEN = 0
 
 # FIXME! More magic numbers!
-HOLD_TOL = 8 # Command hold this far before (meters)
-PAST_TOL = 7 # Tolate going past by this much (meters), FIXME does this make sense?
+HOLD_TOL = 4 # Command hold this far before (meters)
+PAST_TOL = 3 # Tolate going past by this much (meters), FIXME does this make sense?
 LYEL_TOL = HOLD_TOL/1.3 # If red transitions and in this margin, will be a late yellow (tunable parameter)
 
 class World(object):
@@ -595,40 +595,32 @@ class WaypointUpdater(object):
                 closest_wp = i
                 closest_dist = dist
 
-        # 0 is where we are now, use current_velocity from TwistStamped vel()
-        # Get vehicle velocity
-        my_vel = self.vel().twist.linear.x
-        rospy.loginfo('CurrentVel() %f', my_vel)
-        self.set_waypoint_velocity(self.generated_waypoints, 0, my_vel)
 
         # What if the last generated point is closest but it is still far from
         # the light?
         if closest_wp < len(self.generated_waypoints):
-            # find distance this entire profile covers to scale the profile based on current velocity
-            profile_dist = World.distance(self.generated_waypoints[0].pose.pose.position.x,
-                                          self.generated_waypoints[0].pose.pose.position.y,
-                                          self.generated_waypoints[closest_wp].pose.pose.position.x,
-                                          self.generated_waypoints[closest_wp].pose.pose.position.y)
-            rospy.loginfo('Profile_Dist %f', profile_dist)
 
             # then, come to a stop at the end waypoint/stop line
-            for i in range(1, closest_wp):  # 1 since the first waypoint is where we are now
+            for i in range(0, closest_wp):
                 dist = World.distance(self.generated_waypoints[i].pose.pose.position.x,
                                       self.generated_waypoints[i].pose.pose.position.y,
                                       self.generated_waypoints[closest_wp].pose.pose.position.x,
                                       self.generated_waypoints[closest_wp].pose.pose.position.y)
 
-                # Assume applying max decel to the stop point, this would be the velocity at that point
-                profile = math.sqrt(MAX_DECEL * dist)
-                vel = min(my_vel*(profile/math.sqrt(MAX_DECEL*profile_dist)), SPEED_LIMIT)
-                if vel < 1.:
-                    vel = 0.
-                self.set_waypoint_velocity(self.generated_waypoints, i, vel)
-                rospy.loginfo('Point %d  Distance %f  Deceleration %f', i, dist, vel)
+                # Assume applying max decel to the stop point
+                # Time from this point to the stop
+                t = math.sqrt(dist/MAX_DECEL)
 
-            # i is now closest waypoint, always set following to 0.0 velocity
-            for i in range(closest_wp, len(self.generated_waypoints)):
-                self.set_waypoint_velocity(self.generated_waypoints, i, 0)
+                # Velocity that that time
+                vel = 2*MAX_DECEL*t
+
+                # Cap velocity at the speed limit
+                vel = min(vel, SPEED_LIMIT)
+
+                self.set_waypoint_velocity(self.generated_waypoints, i, vel)
+
+            # i is now closest waypoint, always set to 0.0 velocity
+            self.set_waypoint_velocity(self.generated_waypoints, i, 0)
 
 
     def get_waypoint_velocity(self, waypoint):

@@ -33,7 +33,7 @@ Tu = 4*2.1  # seconds, observed full period of oscillation
 #brake_i = 1.2*(Ku/Tu)
 #brake_d = 3*Ku*Tu/40
 # Manually Twiddled
-brake_p = 0.0001
+brake_p = 0.2
 brake_i = 0.0
 brake_d = 0.001
 
