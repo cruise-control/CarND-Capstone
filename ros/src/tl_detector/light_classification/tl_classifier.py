@@ -60,9 +60,10 @@ class TLState(object):
 
 class TLClassifier(object):
                 
-    def __init__(self):
+    def __init__(self, classifier_path):
         #print os.getcwd()
-        graph_file = './light_classification/model/frozen_inference_graph.pb'
+        rospy.loginfo('Loading classifier: %s',classifier_path)
+        graph_file = classifier_path
         self.graph = self._load_graph(graph_file)
         self.sess = tf.Session(graph=self.graph)
 

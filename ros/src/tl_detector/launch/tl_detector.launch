@@ -2,5 +2,6 @@
 <launch>
     <node pkg="tl_detector" type="tl_detector.py" name="tl_detector" output="screen" cwd="node">
         <param name="use_truth" value="0" />
+        <param name="classifier_name" value="./light_classification/model/frozen_inference_graph.pb" />
     </node>
 </launch>
