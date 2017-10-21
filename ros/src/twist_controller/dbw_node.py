@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
-import rospy
-from std_msgs.msg import Bool
 from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
 from geometry_msgs.msg import TwistStamped
+from std_msgs.msg import Int32
+from std_msgs.msg import Bool
+from threading import Lock
+import rospy
 import math
 
 from twist_controller import Controller
@@ -33,13 +35,17 @@ that we have created in the `__init__` function.
 '''
 
 class DBWNode(object):
-    
-    dbw_enabled = False
-    target_twist = None
-    current_velocity = None
-    prev_throttle = 0
-    prev_brake = 0
-    
+
+    # FIXME These are not configured specially, they are just hardcoded in two
+    #       places
+    CONTROL_GO = 0
+    CONTROL_STOP = 1
+
+    @staticmethod
+    def mph2mps(mph):
+        CONVERSION_FACTOR = 0.44704
+        return mph * CONVERSION_FACTOR
+
     def __init__(self):
         rospy.init_node('dbw_node')
 
@@ -61,21 +67,29 @@ class DBWNode(object):
         self.brake_pub = rospy.Publisher('/vehicle/brake_cmd',
                                          BrakeCmd, queue_size=1)
 
-        # TODO: Create `TwistController` object
-        # self.controller = TwistController(<Arguments you wish to provide>)
-        self.yaw_controller = YawController(wheel_base,steer_ratio,0.0,max_lat_accel,max_steer_angle)
-        # TODO Pass in proper initialization values to the controller
-        self.controller = Controller()
+        self._controller = Controller(wheel_base,steer_ratio,0.0,max_lat_accel,max_steer_angle)
 
-        # TODO: Subscribe to all the topics you need to
+        self._brake_deadband = brake_deadband
+
+        self._mode_lock = Lock()
+
+        # Subscribe to all topics
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cb)
-        
         rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_enabled_cb)
-        
         rospy.Subscriber('/current_velocity', TwistStamped, self.current_velocity_cb)
-        
+        rospy.Subscriber('/control_mode', Int32, self.control_mode_cb)
+
+        # Instance variables
+        self.mode = self.CONTROL_STOP
+        self.dbw_enabled = False
+        self.target_twist = None
+        self.current_velocity = None
+        self.prev_throttle = 0
+        self.prev_brake = 0
+
+        # Main function
         self.loop()
-        
+
     def current_velocity_cb(self, cv):
         '''
         cv is a TwistStamped command with values in meters per second
@@ -83,76 +97,108 @@ class DBWNode(object):
         100MPH = ~44 m/s
         50MPH = ~22 m/s
         '''
-        
+
         self.current_velocity = cv.twist
-        #self.current_velocity.linear.x *= 0.44704 # convert to m/s from mph
-        rospy.loginfo('@_1 Curr x %s y %s', str(self.current_velocity.linear.x), str(self.current_velocity.linear.y))
 
-    
+        #rospy.loginfo('@_1 Curr velx %s yawdot %s', str(self.current_velocity.linear.x), str(self.current_velocity.angular.z))
+
     def dbw_enabled_cb(self, dbw):
-        self.dbw_enabled = dbw
-        
-    def twist_cb(self, twistCommand):
-        '''
-        Pull in the TwistCommand
-        '''
-        self.target_twist = twistCommand.twist
-        rospy.loginfo('@_1 Target x %s z %s', str(twistCommand.twist.linear.x), str(twistCommand.twist.angular.z))
+        self.dbw_enabled = bool(dbw.data)
 
-        pass
+    def twist_cb(self, twistCommand):
+        '''Pull in the TwistCommand.'''
+
+        self.target_twist = twistCommand.twist
+        #rospy.loginfo('@_1 Target velx %s yawdot %s', str(twistCommand.twist.linear.x), str(twistCommand.twist.angular.z))
+
+    def control_mode_cb(self, msg):
+        '''Get the mode message.'''
+
+        self._mode_lock.acquire()
+        self.mode = int(msg.data)
+        self._mode_lock.release()
+
+    def mode_go(self):
+        '''Go control mode
+        Use a PID to control brake/throttle/steering
+        '''
+        # Return if there is no target velocity to meet
+        if self.target_twist and self.current_velocity:
+
+            brake_error = 0
+            velocity_error = (self.target_twist.linear.x - self.current_velocity.linear.x)
+
+            # Normalise the brake error as a fraction of 25 mph
+            # meaning that 25 mph overspeed is maximum this will assume the system will achieve
+            if velocity_error < -self._brake_deadband:  # let it coast a little
+                brake_error = -velocity_error   # work in positives
+                self._controller.reset_speed()  # get rid of throttle I
+
+            #rospy.loginfo('@_1 Curr velx %s target %s', str(self.current_velocity.linear.x), str(self.target_twist.linear.x))
+            #rospy.loginfo('@_1 Computing PID vel_err %s & brk_err %s',str(velocity_error), str(brake_error))
+
+            # Pass in the normalized velocity error, brake error and steering values to the controller
+            t, b, s = self._controller.control(
+                error_velocity = velocity_error,
+                error_brake = brake_error,
+                yaw_values=(self.target_twist.linear.x,
+                            self.target_twist.angular.z,
+                            self.current_velocity.linear.x)
+                )
+
+            # If the human driver is driving then reset the controller
+            #if not self.dbw_enabled:
+                #self._controller.reset_brake()
+                #self._controller.reset_speed()
+
+            # If there is no brake error, zero out any command
+            #if brake_error == 0:
+            #    b = 0
+            # Scale b up by maximum torque as listed in the brake command message
+            #b *= BrakeCmd.TORQUE_MAX
+
+            #rospy.loginfo('@_1 PID OUT: THR %s BRK %s YAW %s', str(t), str(b), str(s))
+
+            # If the human driver is not driving then publish commands
+            if self.dbw_enabled:
+                self.publish(t,b,s)
+            else:
+                self._controller.reset_speed()
+                self._controller.reset_brake()
+
+    def mode_stop(self):
+        '''Stop control mode
+        Just hold the brake to the floor!
+        '''
+        self.publish(0, 1, 0)
+        self._controller.reset_speed()
 
     def loop(self):
-        rate = rospy.Rate(60) # NHz
+        rate = rospy.Rate(10) # NHz
         while not rospy.is_shutdown():
-            # Return if there is no target velocity to meet
-            if self.target_twist and self.current_velocity:
-
-                brake_error = 0
-                
-                if(self.current_velocity.linear.x - self.target_twist.linear.x) > 2:
-                    # Normalise the brake error as a fraction of (from ~25 mph)
-                    # meaning that 25 mph overspeed is maximum we are aiming for
-                    brake_error = (self.current_velocity.linear.x - self.target_twist.linear.x)/10;
-                    
-                rospy.loginfo('@_1 Computing PID vel_err %s & brk_err %s',str((self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704), str(brake_error))
-                
-                # Pass in the normalized velocity error to the controller
-                t, b, s = self.controller.control(error_velocity = (self.target_twist.linear.x  - self.current_velocity.linear.x)/44.704, error_brake = brake_error)
-            
-                if not self.dbw_enabled:
-                    self.controller.reset()
-            
-                if brake_error == 0:
-                    b = 0
-                b *= 10000
-                s = self.yaw_controller.get_steering(linear_velocity=self.target_twist.linear.x, 
-                                    angular_velocity=self.target_twist.angular.z, 
-                                    current_velocity=self.current_velocity.linear.x)
-            
-                rospy.loginfo('@_1 Computing PID %s brake %s YAW %s',str(t), str(b), str(s))
-                # TODO: Get predicted throttle, brake, and steering using `twist_controller`
-                # You should only publish the control commands if dbw is enabled
-                # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
-                #                                                     <proposed angular velocity>,
-                #                                                     <current linear velocity>,
-                #                                                     <dbw status>,
-                #                                                     <any other argument you need>)
-                #if  self.dbw_enabled:
-                self.publish(t,b,s)
+            if self.mode == self.CONTROL_GO:
+                self.mode_go()
+            else:
+                self.mode_stop()
             rate.sleep()
 
     def publish(self, throttle, brake, steer):
         # Only publish with updated values. This is to
         # fix the lag issue
-        if brake > 0:
-            if brake != self.prev_brake:
-                self.prev_brake = brake
-                bcmd = BrakeCmd()
-                bcmd.enable = True
-                bcmd.pedal_cmd_type = BrakeCmd.CMD_TORQUE
-                bcmd.pedal_cmd = brake
-                self.brake_pub.publish(bcmd)
-        else:
+        if brake != self.prev_brake:
+            self.prev_brake = brake
+            bcmd = BrakeCmd()
+            bcmd.enable = True
+            #bcmd.pedal_cmd_type = BrakeCmd.CMD_PERCENT
+            #bcmd.pedal_cmd = brake
+            # scale by maximum torque with brake 0-1 to mimic CMD_PERCENT
+            bcmd.pedal_cmd = brake * BrakeCmd.TORQUE_MAX
+            bcmd.pedal_cmd_type = BrakeCmd.CMD_TORQUE  # CMD_PERCENT seems to be ineffective
+            self.brake_pub.publish(bcmd)
+
+        # The simulator latches the commands, so we always need to check
+        # whether or not to apply throttle
+        if brake <= 0:
             #if throttle != self.prev_throttle:
             self.prev_throttle = throttle
             tcmd = ThrottleCmd()
