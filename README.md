@@ -15,7 +15,7 @@ Garrett Pitcher <garrett.pitcher@gmail.com>
 M. M. (need approval)  
 Hanqiu Jiang <hanq.jiang@gmail.com>  
 Shaun Cosgrove <shaun.cosgrove@bogglingtech.com>  
-W. G. (need approval)
+Wei Guo <guoweist@foxmail.com>
 
 
 <img src="./doc/traffic_light_stop.gif">  
