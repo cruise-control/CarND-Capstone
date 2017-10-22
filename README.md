@@ -45,7 +45,11 @@ The basis of the traffic light classification is a Deep Neural Network [Single S
 
 Due to a lack of suitable Machine Learning acceleration hardware available among the development team, we chose to process a reduced number of video frames for the traffic light classification. The planner is crafted with this limitation in mind and the end result is a dependable traffic light detection mechanism that strikes a balance between accuracy and performance.
 
-<img src="./doc/tl_detection.gif">  
+Detection in simulator:  
+<img src="./doc/tl_detection.gif" width="500">  
+
+Detection in rosbags:  
+<img src="./doc/real_tl_detection.gif" width="500">  
 
 The vehicle's point of view as it approaches a set of traffic lights.
 
