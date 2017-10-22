@@ -12,7 +12,7 @@
 
 ### Team Member Names:
 Garrett Pitcher <garrett.pitcher@gmail.com>  
-Mitch Maifeld <udacity@maifeld.name>
+Mitch Maifeld <udacity@maifeld.name>  
 Hanqiu Jiang <hanq.jiang@gmail.com>  
 Shaun Cosgrove <shaun.cosgrove@bogglingtech.com>  
 Wei Guo <guoweist@foxmail.com>
