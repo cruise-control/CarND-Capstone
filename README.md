@@ -62,7 +62,7 @@ RVIZ was used to visualize the generated way-points from the planner.
 
 ### Control
 
-A PID controller is used for Throttle and a PD controller is used for braking.
+A PID controller is used for the Throttle and a PD controller is used for the Brake.  We began tuning by using the on/off relay method to determine time periods to maximum desired speed and declerations to a stop.  We used these as inputs to the Zigler-Nichols PID ratios to initialize our tuning.  From there, we manually refined the proportional gain, integral, and derivative parameters to reach the response shown in the figure below.  We created the plot in rqt_plot to show the throttle PID's recovery stability.  The blue line shows our commanded throttle setting; the red line shows the vehicles response to the command.  Prior to 282 in the figure, the vehicle was manually controlled to an over-desired velocity.  Removing the manual control at 282, the automatic throttle kept a zero until the vehicle coasted back to the desired speed beginning about 289 and reaching steady state at 291.  At 297, we switched to manual again and applied the brakes to reach a stop.  At 300, we return to automatic control where the vehicle applies full throttle (such as at a stop light) to clear the intersection and quickly reach desired speed.  It reaches that desired speed near 315 with minimal overshoot but quick return to set point.
 
 <img src="./doc/controller_tuning.png" width="500">  
 
