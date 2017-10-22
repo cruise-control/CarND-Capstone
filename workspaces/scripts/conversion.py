@@ -1,4 +1,5 @@
 from random import shuffle
+from PIL import Image
 import pandas as pd
 import yaml
 
@@ -57,13 +58,15 @@ def convertToCSV(boxes,f, label, header=False):
     y = int(boxes[1])
     w = int(boxes[2])
     h = int(boxes[3])
+    img = Image.open(f)
+    width, height = img.size
     x_min = x 
-    x_min = int(clamp( x, 800))
-    x_max = int(clamp( x + w , 800)) 
-    y_max = int(clamp( y + h , 600))
-    y_min = int(clamp( y, 600)) 
-        
-    return str(f) + ',' + str(800) + ',' + str(600) + ',' + str(label) + ',' + str(x_min) + ',' + str(y_min) + ',' + str(x_max) + ',' + str(y_max) + '\n'
+    x_min = int(clamp( x, width))
+    x_max = int(clamp( x + w , width)) 
+    y_max = int(clamp( y + h , height))
+    y_min = int(clamp( y, height)) 
+         
+    return str(f) + ',' + str(height) + ',' + str(width) + ',' + str(label) + ',' + str(x_min) + ',' + str(y_min) + ',' + str(x_max) + ',' + str(y_max) + '\n'
     
 # The data stripping and collection pipeline
 def pipeline(filepath, prefix):
@@ -97,6 +100,8 @@ prefix = ''
 output = convertToCSV(None,None,None, header=True) + '\n'
 #output += pipeline('./Simulation_1/via_region_data.csv', './Simulation')
 output += pipeline('./RosBag/bag_region_data.csv', './RosBag')
+output += pipeline('./color_just_traffic_light/via_region_data.csv', './color_just_traffic_light')
+output += pipeline('./color_loop_with_traffic_light/bag_region_data.csv', './color_loop_with_traffic_light')
 print(output)
       
 # Write it to a csv file
