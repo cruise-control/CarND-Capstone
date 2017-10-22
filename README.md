@@ -41,7 +41,7 @@ Wei Guo <guoweist@foxmail.com>
 
 <img src="./doc/ssd_architecture.png" width="700">
 
-The basis of the traffic light classification is a Deep Neural Network [Single Shot MultiBox Detector (SSD)](http://www.cs.unc.edu/~wliu/papers/ssd.pdf) architecture. This  classifies the object and detects a bounding box for said object. For greater classification accuracy, we created two models, one trained on simulator images and one trained on images taken from a run around the course on Carla (extracted from a rosbag provided by Udacity). These images were extracted and labeled using the VIA tool (see below). A pre-trained model from [Tensorflow detection model zoo](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md) was re-trained with the [Tensorflow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection).  
+The basis of the traffic light classification is a Deep Neural Network [Single Shot MultiBox Detector (SSD)](http://www.cs.unc.edu/~wliu/papers/ssd.pdf) architecture. This  classifies the object and detects a bounding box for said object. For greater classification accuracy, we created two models, one trained on simulator images and one trained on images taken from a run around the course on Carla (extracted from a rosbag provided by Udacity). These images were extracted and labeled using the VIA tool (see below). A pre-trained model from [Tensorflow detection model zoo](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md) was re-trained with the [Tensorflow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection). The underlying [MobileNet](https://arxiv.org/abs/1704.04861) architecture trades accuracy for high efficiency and enables us to detect traffic light with high fps.
 
 Due to a lack of suitable Machine Learning acceleration hardware available among the development team, we chose to process a reduced number of video frames for the traffic light classification. The planner is crafted with this limitation in mind and the end result is a dependable traffic light detection mechanism that strikes a balance between accuracy and performance.
 
@@ -70,7 +70,6 @@ A PID controller is used for Throttle and a PD controller is used for braking.
 
 [Tensorflow Object Detection](https://github.com/tensorflow/models/tree/master/research/object_detection)
 
-An extremely approachable aritcle, [Racoon Training](https://medium.com/towards-data-science/how-to-train-your-own-object-detector-with-tensorflows-object-detector-api-bec72ecfe1d9) by [Dat Tran](https://github.com/datitran/raccoon_dataset) was used to guide the initial steps into the tensorflow object detection utilities. Tools from his repository were used or modified to create the protobuf binaries for training the object detector. 
+An extremely approachable aritcle, [Racoon Training](https://medium.com/towards-data-science/how-to-train-your-own-object-detector-with-tensorflows-object-detector-api-bec72ecfe1d9) by [Dat Tran](https://github.com/datitran/raccoon_dataset) was used to guide the initial steps into the tensorflow object detection utilities. Tools from his repository were used or modified to create the protobuf binaries for training the object detector.
 
 [VGG Image Annotator (VIA)](http://www.robots.ox.ac.uk/~vgg/software/via/)
-
