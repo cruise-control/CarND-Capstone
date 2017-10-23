@@ -676,8 +676,9 @@ class WaypointUpdater(object):
                 vel = min(vel, SPEED_LIMIT)
 
                 self.set_waypoint_velocity(self.generated_waypoints, i, vel)
+            
             # The for loop may not be entered, guard against it.
-            if i is not None:
+            if closest_wp > 0:
                 # i is now closest waypoint, always set to 0.0 velocity
                 self.set_waypoint_velocity(self.generated_waypoints, i, 0)
 
