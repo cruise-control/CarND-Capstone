@@ -42,7 +42,7 @@ Steps:
 '''
 
 PLAN_INTERVAL = 2 # Seconds per path plan step
-SPEED_LIMIT= 15
+#SPEED_LIMIT= 4.25 # m/2 or < 10mph
 MAX_DECEL = 1.5
 
 # FIXME! Magic number alert!
@@ -280,7 +280,8 @@ class WaypointUpdater(object):
 
         # Ego data
         self.POSE_HIST_SZ = 2 # Save last 2 poses received
-        SPEED_LIMIT = rospy.get_param("/velocity")*0.44704 # Get param speedlimit in m/s
+        self.SPEED_LIMIT = ( rospy.get_param("~velocity") * 1000.) / (60. * 60.)
+        print(self.SPEED_LIMIT)
 
         # Pose history requires a lock because it us updated by the subscriber
         # callback
@@ -373,7 +374,7 @@ class WaypointUpdater(object):
         # We know that the waypoint_follower node attempts to track a point 2
         # seconds out and to account for the interval in our plan step, we
         # plan at least 2+PLAN_INTERVAL seconds out
-        ctrl_spline_length = (2+PLAN_INTERVAL) * max(speed, SPEED_LIMIT)
+        ctrl_spline_length = (2+PLAN_INTERVAL) * max(speed, self.SPEED_LIMIT)
         ctrl_pt_spacing = 5 # meter spacing between control points
         n_ctrl_pts = int(math.ceil(ctrl_spline_length / ctrl_pt_spacing))
 
@@ -583,7 +584,7 @@ class WaypointUpdater(object):
         self.control_mode_pub.publish(Int32(self.CONTROL_GO))
 
         # Set velocity profile
-        self.set_constant_velocity_profile(SPEED_LIMIT)
+        self.set_constant_velocity_profile(self.SPEED_LIMIT)
 
         # Create a new lane message type and publish it
         l = Lane()
@@ -674,7 +675,7 @@ class WaypointUpdater(object):
                 vel = 2*MAX_DECEL*t
 
                 # Cap velocity at the speed limit
-                vel = min(vel, SPEED_LIMIT)
+                vel = min(vel, self.SPEED_LIMIT)
 
                 self.set_waypoint_velocity(self.generated_waypoints, i, vel)
             
