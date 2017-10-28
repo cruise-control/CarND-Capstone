@@ -280,6 +280,7 @@ class WaypointUpdater(object):
 
         # Ego data
         self.POSE_HIST_SZ = 2 # Save last 2 poses received
+        SPEED_LIMIT = rospy.get_param("/velocity")*0.44704 # Get param speedlimit in m/s
 
         # Pose history requires a lock because it us updated by the subscriber
         # callback
