@@ -440,7 +440,8 @@ class WaypointUpdater(object):
 
         # Get vehicle velocity
         my_vel = self.vel()
-        self.speed = math.sqrt(my_vel.twist.linear.x**2 + my_vel.twist.linear.y**2)
+        if my_vel is not None:  # no _current_velocity_cb yet
+            self.speed = math.sqrt(my_vel.twist.linear.x**2 + my_vel.twist.linear.y**2)
 
 
     def loop(self):
@@ -542,7 +543,11 @@ class WaypointUpdater(object):
             hold_s, _ = self.world.cartesian_to_frenet(self.hold_pos[0], self.hold_pos[1], self.heading)
             dtg = hold_s - self.s;
 
-            time_to_intercept = dtg/self.speed
+            if self.speed > 0:
+                time_to_intercept = dtg/self.speed
+            else:  # speed of 0, divide by 0
+                time_to_intercept = 10
+
             if self.hold_state == RED:
                 time_to_red = -float('inf')
             else:
@@ -671,9 +676,11 @@ class WaypointUpdater(object):
                 vel = min(vel, SPEED_LIMIT)
 
                 self.set_waypoint_velocity(self.generated_waypoints, i, vel)
-
-            # i is now closest waypoint, always set to 0.0 velocity
-            self.set_waypoint_velocity(self.generated_waypoints, i, 0)
+            
+            # The for loop may not be entered, guard against it.
+            if closest_wp > 0:
+                # i is now closest waypoint, always set to 0.0 velocity
+                self.set_waypoint_velocity(self.generated_waypoints, i, 0)
 
 
     def get_waypoint_velocity(self, waypoint):
