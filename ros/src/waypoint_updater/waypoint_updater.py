@@ -42,7 +42,6 @@ Steps:
 '''
 
 PLAN_INTERVAL = 2 # Seconds per path plan step
-#SPEED_LIMIT= 4.25 # m/2 or < 10mph
 MAX_DECEL = 1.5
 
 # FIXME! Magic number alert!
@@ -86,6 +85,13 @@ class World(object):
         waypoints = rospy.wait_for_message('/base_waypoints', Lane)
         self._update_map_waypoints(waypoints.waypoints)
         self.waypoints = waypoints.waypoints
+        
+        # Get all of the speeds assigned to the map
+        speed = [x.twist.twist.linear.x for x in self.waypoints]
+        
+        # Set the speed limit based on the maximum speed found in the 
+        # waypoints
+        self.SPEED_LIMIT = max(speed)
 
         # Subscribe to traffic waypoints
         rospy.Subscriber('/traffic_waypoint', Int32, self._traffic_cb)
@@ -280,8 +286,8 @@ class WaypointUpdater(object):
 
         # Ego data
         self.POSE_HIST_SZ = 2 # Save last 2 poses received
-        self.SPEED_LIMIT = ( rospy.get_param("~velocity") * 1000.) / (60. * 60.)
-        print(self.SPEED_LIMIT)
+
+        print(self.world.SPEED_LIMIT)
 
         # Pose history requires a lock because it us updated by the subscriber
         # callback
@@ -374,7 +380,7 @@ class WaypointUpdater(object):
         # We know that the waypoint_follower node attempts to track a point 2
         # seconds out and to account for the interval in our plan step, we
         # plan at least 2+PLAN_INTERVAL seconds out
-        ctrl_spline_length = (2+PLAN_INTERVAL) * max(speed, self.SPEED_LIMIT)
+        ctrl_spline_length = (2+PLAN_INTERVAL) * max(speed, self.world.SPEED_LIMIT)
         ctrl_pt_spacing = 5 # meter spacing between control points
         n_ctrl_pts = int(math.ceil(ctrl_spline_length / ctrl_pt_spacing))
 
@@ -584,7 +590,7 @@ class WaypointUpdater(object):
         self.control_mode_pub.publish(Int32(self.CONTROL_GO))
 
         # Set velocity profile
-        self.set_constant_velocity_profile(self.SPEED_LIMIT)
+        self.set_constant_velocity_profile(self.world.SPEED_LIMIT)
 
         # Create a new lane message type and publish it
         l = Lane()
@@ -675,7 +681,7 @@ class WaypointUpdater(object):
                 vel = 2*MAX_DECEL*t
 
                 # Cap velocity at the speed limit
-                vel = min(vel, self.SPEED_LIMIT)
+                vel = min(vel, self.world.SPEED_LIMIT)
 
                 self.set_waypoint_velocity(self.generated_waypoints, i, vel)
             
